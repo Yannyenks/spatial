@@ -1,0 +1,10 @@
+node_modules
+.next
+storage
+*.db
+*.db-journal
+.env
+.env.*
+!.env.example
+.git
+tests/test.db

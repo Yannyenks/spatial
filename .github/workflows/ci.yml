@@ -1,0 +1,51 @@
+name: CI
+
+# Execution-plan §73: PUSH → LINT → TYPECHECK → UNIT TEST → INTEGRATION TEST
+# → BUILD, blocking merge on any failure. E2E is deliberately not wired in
+# here yet — there is no committed E2E suite (see docs/rd-blueprint-classification.md
+# and the feature audit for that gap); running the Playwright smoke checks
+# used during development against a real dev server is a follow-up.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "file:./dev.db"
+      SESSION_SECRET: "ci-secret-not-for-production"
+      STORAGE_PROVIDER: "local"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

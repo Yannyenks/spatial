@@ -1,0 +1,35 @@
+import type { NextConfig } from "next";
+
+// Baseline security headers (§29). Kept intentionally conservative — no
+// third-party script/style sources are declared here since the app
+// serves no external embeds; tighten further (e.g. a real CSP) once
+// white-label custom domains / embedded fonts are wired up (§25).
+const securityHeaders = [
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+];
+
+const nextConfig: NextConfig = {
+  // Self-contained server.js + only the node_modules a request actually
+  // needs (execution-plan §75: Docker Compose local dev / deployment) —
+  // see Dockerfile. Has no effect on `next dev`.
+  output: "standalone",
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
+  // Versioned API surface (execution-plan doc §53/§57/§117: "/api/v1/").
+  // A rewrite rather than moving every route file: today there is exactly
+  // one API consumer (this app's own frontend), so paying the cost of
+  // restructuring ~30 route handlers for a version prefix with nothing to
+  // version against yet would be premature (§100: "do not overengineer
+  // the MVP"). External/Enterprise API consumers get a stable `/api/v1/*`
+  // contract now; if a real v2 is ever needed, routes move under
+  // `src/app/api/v1/**` at that point and this rewrite is deleted.
+  async rewrites() {
+    return [{ source: "/api/v1/:path*", destination: "/api/:path*" }];
+  },
+};
+
+export default nextConfig;

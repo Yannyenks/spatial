@@ -1,0 +1,57 @@
+# Local dev via Docker (execution-plan §75). NOT required to develop this
+# project — `npm run dev` alone is still enough day-to-day (see README),
+# since the default SQLite + local-disk setup needs zero external
+# services. This exists for the two things that setup can't demonstrate:
+# running against real PostgreSQL, and running the worker as its own
+# process/container rather than in-process with the web server (§3/§31).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spatial
+      POSTGRES_PASSWORD: spatial
+      POSTGRES_DB: spatial
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spatial"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://spatial:spatial@postgres:5432/spatial
+      SESSION_SECRET: dev-only-insecure-secret-change-me
+      STORAGE_PROVIDER: local
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      # The web container never polls the job queue itself — see `worker`
+      # below — matching the production topology in docs/deployment.md.
+      DISABLE_INPROCESS_WORKER: "1"
+    volumes:
+      - storage-data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["npm", "run", "worker"]
+    environment:
+      DATABASE_URL: postgresql://spatial:spatial@postgres:5432/spatial
+      STORAGE_PROVIDER: local
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    volumes:
+      - storage-data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  storage-data:

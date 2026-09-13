@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/*
+ * Design system tokens (§5).
+ *
+ * Palette: a near-neutral warm-gray scale (paper / ink) with a single
+ * restrained accent ("bronze") used only for primary actions and focus
+ * states — never for large surfaces. This is deliberately closer to a
+ * precision instrument (architecture software, professional camera UI)
+ * than a typical colorful SaaS product.
+ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --color-paper: #fbfaf8;
+  --color-paper-muted: #f2f0ec;
+  --color-ink: #16140f;
+  --color-ink-muted: #55524a;
+  --color-line: #e4e1d9;
+
+  --color-paper-dark: #0b0a08;
+  --color-paper-dark-muted: #17150f;
+  --color-ink-dark: #f5f3ee;
+  --color-ink-dark-muted: #a8a397;
+  --color-line-dark: #2a2721;
+
+  --color-accent: #a97e3f;
+  --color-accent-strong: #8c6730;
+  --color-accent-soft: #f1e6d3;
+
+  --color-success: #3f7d58;
+  --color-warning: #b8862f;
+  --color-danger: #b8452f;
+
+  --radius-md: 0.625rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+
+  --shadow-soft: 0 1px 2px rgba(20, 18, 12, 0.04), 0 8px 24px -12px rgba(20, 18, 12, 0.12);
+  --shadow-lift: 0 2px 4px rgba(20, 18, 12, 0.06), 0 16px 40px -16px rgba(20, 18, 12, 0.18);
+
+  /*
+   * The one interaction-transition curve for the whole product (video
+   * master-prompt §6): a light ease-out-expo, cinematic rather than the
+   * browser's default `ease`. Exposed by Tailwind v4 as the `ease-cinematic`
+   * utility (any `--ease-*` theme token maps to `ease-*` automatically) —
+   * use that utility everywhere instead of repeating the curve inline or
+   * introducing a second one.
+   */
+  --ease-cinematic: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root {
+  color-scheme: light;
+  --bg: var(--color-paper);
+  --bg-muted: var(--color-paper-muted);
+  --fg: var(--color-ink);
+  --fg-muted: var(--color-ink-muted);
+  --line: var(--color-line);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: var(--color-paper-dark);
+    --bg-muted: var(--color-paper-dark-muted);
+    --fg: var(--color-ink-dark);
+    --fg-muted: var(--color-ink-dark-muted);
+    --line: var(--color-line-dark);
+  }
+}
+
+/*
+ * Cinematic identity (docs/design-system.md) — the marketing/landing page
+ * forces this regardless of OS light/dark preference. Scoped to a class
+ * on a wrapper element (not <html>) because the root layout is shared by
+ * every route and can't vary its `<html>` attributes per route segment
+ * without a client-side mutation (which would flash the wrong theme on
+ * first paint). CSS custom properties inherit to all descendants, so this
+ * is equivalent in effect without touching <html>.
+ */
+.cinematic {
+  color-scheme: dark;
+  --bg: #08090b;
+  --bg-muted: #111318;
+  --fg: #f4f3ef;
+  --fg-muted: #8b8d94;
+  --line: #1f2127;
+}
+
+.text-display {
+  font-size: clamp(2.75rem, 6vw, 5.5rem);
+  line-height: 1.02;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.text-heading {
+  font-size: clamp(1.5rem, 2.4vw, 2rem);
+  line-height: 1.15;
+  font-weight: 600;
+}
+.text-body {
+  font-size: clamp(1rem, 1.1vw, 1.125rem);
+  line-height: 1.6;
+  font-weight: 400;
+}
+.text-technical {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  border-color: var(--line);
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

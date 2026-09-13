@@ -1,0 +1,494 @@
+// AI Spatial Experience Platform — data model.
+//
+// NOTE ON DATASOURCE: the target production database is PostgreSQL (per the
+// product spec). This schema is written to be Postgres-compatible (no
+// SQLite-only features), but the `provider` below is set to "sqlite" so the
+// app can be installed, migrated and run end-to-end in this environment
+// without a running Postgres server. To deploy against Postgres, change
+// `provider = "postgresql"` and point DATABASE_URL at a real instance —
+// no model changes are required. See docs/deployment.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity & tenancy
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  memberships  Membership[]
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Organization {
+  id            String        @id @default(cuid())
+  name          String
+  slug          String        @unique
+  plan          String        @default("STARTER") // PlanId
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  memberships   Membership[]
+  projects      Project[]
+  subscription  Subscription?
+  usageRecords  UsageRecord[]
+  webhookEndpoints WebhookEndpoint[]
+}
+
+/**
+ * Real usage metering (§63/§64 execution-plan doc: "cost control", "usage
+ * records"). Quotas that can be computed live from existing rows (project
+ * count, current storage bytes) still are — see `src/lib/quotas.ts` — but
+ * time-series metrics like AI job counts, processed seconds and video
+ * generations need their own append-only log so a billing period can be
+ * summarized without re-scanning every job ever run.
+ */
+model UsageRecord {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  metric         String // UsageMetric
+  quantity       Float
+  metadataJson   String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([metric])
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  role           String       @default("MEMBER") // MemberRole
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+model Subscription {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan           String       @default("STARTER")
+  status         String       @default("ACTIVE")
+  currentPeriodEnd DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Projects & spaces
+// ---------------------------------------------------------------------------
+
+model Project {
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  type           String // ProjectType
+  status         String          @default("DRAFT") // ProjectStatus
+  coverImageUrl  String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  spaces         Space[]
+  assets         Asset[]
+  aiJobs         AIJob[]
+  experience     Experience?
+  videoJobs      VideoGenerationJob[]
+  relations      SpatialRelation[]
+
+  @@index([organizationId])
+}
+
+model Space {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name          String
+  kind          String // SpaceKind
+  order         Int      @default(0)
+  coverAssetId  String?
+  createdAt     DateTime @default(now())
+
+  // Semantic World Model containment hierarchy (e.g. Building > Floor > Room),
+  // separate from the navigation graph (SpaceConnection) which models how a
+  // visitor moves between spaces rather than which space belongs to which.
+  parentSpaceId String?
+  parent        Space?   @relation("SpaceHierarchy", fields: [parentSpaceId], references: [id], onDelete: SetNull)
+  children      Space[]  @relation("SpaceHierarchy")
+
+  assets          Asset[]
+  scene           Scene?
+  reconstructions Reconstruction[]
+  hotspots        Hotspot[]
+  connectionsFrom SpaceConnection[] @relation("ConnectionFrom")
+  connectionsTo   SpaceConnection[] @relation("ConnectionTo")
+
+  @@index([projectId])
+  @@index([parentSpaceId])
+}
+
+/**
+ * Spatial Knowledge Graph edge (§12, §46): a typed relation between two
+ * spatial entities (or an entity and a free-text concept not yet modeled
+ * as its own object), e.g. `Room 204 --overlooks--> Pool Deck` or
+ * `Room 204 --has--> "balcony"`. This is what elevates the platform from
+ * "a list of rooms" to a queryable semantic model (see
+ * spatial-query.service.ts).
+ */
+model SpatialRelation {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subjectType String // "SPACE" | "OBJECT"
+  subjectId   String
+  predicate   String // e.g. "contains" | "connected_to" | "overlooks" | "has" | "near"
+  objectType  String // "SPACE" | "OBJECT" | "CONCEPT"
+  objectId    String? // Space/SpatialObjectRecord id when objectType is SPACE/OBJECT
+  objectLabel String? // free-text concept when objectType is "CONCEPT" (e.g. "balcony")
+  confidence  Float    @default(1)
+  provenance  String   @default("INFERRED") // REAL | COMPUTED | INFERRED | GENERATED
+  createdAt   DateTime @default(now())
+
+  @@index([projectId])
+  @@index([subjectId])
+  @@index([predicate])
+}
+
+model SpaceConnection {
+  id           String  @id @default(cuid())
+  fromSpaceId  String
+  fromSpace    Space   @relation("ConnectionFrom", fields: [fromSpaceId], references: [id], onDelete: Cascade)
+  toSpaceId    String
+  toSpace      Space   @relation("ConnectionTo", fields: [toSpaceId], references: [id], onDelete: Cascade)
+  positionX    Float?
+  positionY    Float?
+  positionZ    Float?
+  directionX   Float?
+  directionY   Float?
+  directionZ   Float?
+  label        String?
+
+  @@index([fromSpaceId])
+  @@index([toSpaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Assets (storage)
+// ---------------------------------------------------------------------------
+
+model Asset {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  spaceId         String?
+  space           Space?   @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  kind            String // AssetKind
+  bucket          String // StorageBucket
+  storageKey      String
+  thumbnailKey    String?
+  sizeBytes       Int
+  width           Int?
+  height          Int?
+  durationSeconds Float?
+  createdAt       DateTime @default(now())
+
+  @@index([projectId])
+  @@index([spaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Spatial model
+// ---------------------------------------------------------------------------
+
+model Scene {
+  id        String   @id @default(cuid())
+  spaceId   String   @unique
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  metadataJson String @default("{}")
+  createdAt DateTime @default(now())
+
+  objects          SpatialObjectRecord[]
+  cameraPoses      CameraPose[]
+  navigationPoints String @default("[]") // JSON Vector3[] — synthesized for the viewer, not itself an observation
+}
+
+/**
+ * A single camera position/orientation recovered during reconstruction
+ * (execution-plan doc §5/§10, R&D blueprint §7/§10/§29 "reality
+ * provenance"). Kept as real rows rather than an opaque JSON blob so each
+ * pose can carry its own confidence and be traced back to the exact frame
+ * it came from — "why does the system think the camera was here?" should
+ * always be answerable.
+ */
+model CameraPose {
+  id            String  @id @default(cuid())
+  sceneId       String
+  scene         Scene   @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  positionX     Float
+  positionY     Float
+  positionZ     Float
+  rotationX     Float   @default(0)
+  rotationY     Float   @default(0)
+  rotationZ     Float   @default(0)
+  /** Seconds into the capture, or frame index when no timestamp is available. */
+  timestamp     Float   @default(0)
+  confidence    Float   @default(1)
+  /** The Asset (frame/photo) this pose was estimated from, when known. */
+  sourceAssetId String?
+  order         Int     @default(0)
+
+  @@index([sceneId])
+}
+
+model SpatialObjectRecord {
+  id         String  @id @default(cuid())
+  sceneId    String
+  scene      Scene   @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  type       String
+  label      String?
+  positionX  Float
+  positionY  Float
+  positionZ  Float
+  rotationX  Float   @default(0)
+  rotationY  Float   @default(0)
+  rotationZ  Float   @default(0)
+  scaleX     Float   @default(1)
+  scaleY     Float   @default(1)
+  scaleZ     Float   @default(1)
+  confidence Float   @default(1)
+  // §46 technological-separation principle: is this object something the
+  // capture actually showed (REAL/COMPUTED from real pixels), something
+  // the pipeline inferred without direct visual confirmation (INFERRED),
+  // or something an AI created that doesn't exist on site (GENERATED)?
+  // The UI must never present INFERRED/GENERATED data with the same
+  // confidence as REAL/COMPUTED data.
+  provenance String @default("INFERRED") // REAL | COMPUTED | INFERRED | GENERATED
+  metadataJson String @default("{}")
+
+  @@index([sceneId])
+}
+
+// ---------------------------------------------------------------------------
+// Model registry (execution-plan doc §21, R&D blueprint §61/§62)
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per (provider, model, version) combination this platform has
+ * ever run — not per job. Jobs and reconstructions reference a
+ * `ModelVersion` by id so "which exact model produced this?" is a lookup,
+ * and comparing quality/cost/speed across versions (experiment tracking)
+ * is a query over this table's `AIJob`/`Reconstruction` children rather
+ * than parsing free-text provider/model strings.
+ */
+model ModelVersion {
+  id           String   @id @default(cuid())
+  provider     String
+  model        String
+  version      String   @default("v0")
+  capabilities String? // JSON string[], e.g. ["reconstruction", "depth"]
+  status       String   @default("ACTIVE") // ACTIVE | DEPRECATED | EXPERIMENTAL
+  createdAt    DateTime @default(now())
+
+  aiJobs          AIJob[]
+  reconstructions Reconstruction[]
+
+  @@unique([provider, model, version])
+}
+
+// ---------------------------------------------------------------------------
+// AI jobs / processing pipeline
+// ---------------------------------------------------------------------------
+
+model AIJob {
+  id             String        @id @default(cuid())
+  projectId      String
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  spaceId        String?
+  provider       String
+  model          String
+  modelVersionId String?
+  modelVersion   ModelVersion? @relation(fields: [modelVersionId], references: [id], onDelete: SetNull)
+  status         String        @default("QUEUED") // JobStatus
+  stage          String        @default("QUEUED") // JobStage
+  progress       Int           @default(0)
+  errorJson      String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  durationMs     Int?
+  costCents      Int?
+  createdAt      DateTime      @default(now())
+
+  @@index([projectId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Reconstruction & versioning
+// ---------------------------------------------------------------------------
+
+model Reconstruction {
+  id            String   @id @default(cuid())
+  projectId     String
+  spaceId       String
+  space         Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  version       Int
+  method        String // ReconstructionMethod
+  status        String   @default("QUEUED") // JobStatus
+  qualityJson   String?
+  outputUri     String?
+  isCurrent     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  // Model registry (§27): which provider/model produced this specific
+  // version, so results can be compared/benchmarked/rolled back across
+  // provider or model changes over time — not just across our own
+  // "MOCK" vs future real methods.
+  provider       String?
+  model          String?
+  modelVersionId String?
+  modelVersion   ModelVersion? @relation(fields: [modelVersionId], references: [id], onDelete: SetNull)
+  sourceJobId    String?
+
+  @@index([spaceId])
+  @@index([projectId])
+}
+
+// ---------------------------------------------------------------------------
+// Experience & hotspots
+// ---------------------------------------------------------------------------
+
+model Experience {
+  id              String    @id @default(cuid())
+  projectId       String    @unique
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name            String
+  slug            String    @unique
+  visibility      String    @default("PRIVATE") // ExperienceVisibility
+  passwordHash    String?
+  brandingJson    String    @default("{}")
+  publishedAt     DateTime?
+  currentVersion  Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  analyticsEvents AnalyticsEvent[]
+}
+
+model Hotspot {
+  id             String  @id @default(cuid())
+  spaceId        String
+  space          Space   @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  type           String // HotspotType
+  title          String
+  description    String?
+  positionX      Float
+  positionY      Float
+  positionZ      Float
+  targetSpaceId  String?
+  externalUrl    String?
+  mediaAssetId   String?
+  order          Int     @default(0)
+
+  @@index([spaceId])
+}
+
+// ---------------------------------------------------------------------------
+// AI Studio / generative media
+// ---------------------------------------------------------------------------
+
+model VideoGenerationJob {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  provider   String
+  status     String   @default("QUEUED")
+  inputJson  String
+  outputUrl  String?
+  errorJson  String?
+  createdAt  DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+model AnalyticsEvent {
+  id           String     @id @default(cuid())
+  experienceId String
+  experience   Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  name         String // AnalyticsEventName
+  sessionId    String
+  spaceId      String?
+  hotspotId    String?
+  metadataJson String?
+  country      String?
+  device       String?
+  createdAt    DateTime   @default(now())
+
+  @@index([experienceId])
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks (execution-plan §58: "Enterprise clients can integrate these
+// events with their own systems")
+// ---------------------------------------------------------------------------
+
+model WebhookEndpoint {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  url            String
+  /** Shared secret used to HMAC-sign delivered payloads (X-Spatial-Signature). */
+  secret         String
+  /** JSON string[] of subscribed event names, e.g. ["reconstruction.completed"]. */
+  events         String
+  enabled        Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  deliveries WebhookDelivery[]
+
+  @@index([organizationId])
+}
+
+model WebhookDelivery {
+  id         String          @id @default(cuid())
+  endpointId String
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  event      String
+  payloadJson String
+  statusCode Int?
+  error      String?
+  createdAt  DateTime        @default(now())
+
+  @@index([endpointId])
+}
