@@ -189,7 +189,16 @@ export function ScrollScrubVideo({
             aria-label={ariaLabel}
             muted
             playsInline
-            preload={priority ? "auto" : "metadata"}
+            // Always "auto", not just for `priority`: this is a scrub video —
+            // currentTime gets rewritten on every rAF tick once scrolled into
+            // view. "metadata" only fetches on-demand byte ranges as currentTime
+            // moves, and a rapid-fire scrub cancels each in-flight range fetch
+            // before it resolves, so readyState never climbs past HAVE_METADATA
+            // and the frame visibly freezes/stutters instead of tracking scroll.
+            // `priority` only controls *when* loading starts (immediately vs.
+            // gated by the IntersectionObserver below) — once it starts, a
+            // scrub video always needs the whole file buffered ahead of time.
+            preload="auto"
           >
             <source src={src} type="video/mp4" />
           </video>

@@ -49,3 +49,6 @@ storage/
 # raw pre-encoding video originals — not served, only public/videos/*
 # (the ffmpeg-encoded output) ships to the app; see scripts/encode-videos.sh
 /source-videos/
+
+.vercel
+.env*
