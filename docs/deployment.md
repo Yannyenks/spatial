@@ -102,3 +102,32 @@ output. Fixing them requires a Next.js 16 major upgrade
 (`npm audit fix --force`), which was deliberately not applied here to
 avoid introducing an unvalidated breaking change; revisit this
 before a production launch by testing a Next 16 upgrade in isolation.
+
+## Vercel
+
+The live deployment (`spatial-experience-platform` on Vercel, project
+`axso-s-projects/spatial-experience-platform`) uses a Neon Postgres
+database, provisioned via `vercel install neon` — this connects the
+database to the project and sets `DATABASE_URL` (pooled, for the app's
+own runtime queries) and `DATABASE_URL_UNPOOLED` (direct, for schema
+changes) across all three environments automatically.
+
+Vercel runs the `vercel-build` script instead of `build` when one is
+present in `package.json`. It does, at build time and without touching
+the committed schema, the same sqlite→postgresql provider patch the
+Dockerfile does (see above), then syncs the schema straight to Neon with
+`prisma db push` against the *unpooled* URL — Neon's pooled connection
+doesn't reliably support the DDL a schema push issues, the same reason
+`docker-entrypoint.sh` uses `db push` instead of replaying the
+SQLite-flavored committed migrations. As with the Docker path, this is
+`db push`, not a generated Postgres migration history — do that before
+this matters for real user data.
+
+Required production env vars beyond `DATABASE_URL`/`DATABASE_URL_UNPOOLED`
+(Neon sets those): `SESSION_SECRET` (a real random value), plus
+`STORAGE_PROVIDER`, `RECONSTRUCTION_PROVIDER`, `AI_PROVIDER`,
+`VIDEO_PROVIDER` and `NEXT_PUBLIC_APP_URL` — currently set to the mock
+providers and local storage (see `.env.example`), which is why
+reconstruction/AI/video features run against the honestly-labeled mock
+pipeline rather than a real provider until those are swapped for real
+values, same as local dev.
