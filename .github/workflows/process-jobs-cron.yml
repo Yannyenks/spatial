@@ -1,0 +1,37 @@
+name: Process job queue
+
+# Drains the AIJob queue on production by hitting /api/cron/process-jobs
+# on a schedule. Vercel is serverless — there is no persistent process for
+# src/instrumentation.ts's poller (dev) or `npm run worker` (traditional
+# production) to run in, so without this, a queued job only advances as an
+# accidental side effect of unrelated traffic and can get stuck forever
+# once the triggering serverless function is frozen. See
+# docs/deployment.md for the full explanation and the non-serverless
+# alternative (a real standalone worker process) once volume justifies it.
+#
+# GitHub Actions' schedule trigger is best-effort, not exact — GitHub
+# documents that scheduled runs can be delayed, especially around the top
+# of the hour under high platform load, and 5 minutes is close to the
+# practical floor for interval reliability. Fine for MVP-stage volume
+# given each mock job completes in well under a second once claimed; not
+# a substitute for a real worker at real scale.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call process-jobs endpoint
+        run: |
+          status=$(curl -sS -o response.json -w "%{http_code}" -X POST \
+            "${{ vars.APP_URL || 'https://spatial-experience-platform.vercel.app' }}/api/cron/process-jobs" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP status: $status"
+          cat response.json
+          if [ "$status" -ge 300 ]; then
+            echo "process-jobs call failed"
+            exit 1
+          fi

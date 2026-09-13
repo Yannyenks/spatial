@@ -44,6 +44,37 @@ In local dev, a single `npm run dev` process does both (via
 `src/instrumentation.ts`), which is why the mock pipeline "just works"
 without any extra setup.
 
+### Vercel: no persistent worker, cron instead
+
+Vercel has no long-lived process for either of the two above — every
+request is served by a short-lived serverless function invocation.
+`src/instrumentation.ts`'s poller technically still runs there, but only
+for the lifetime of whichever invocation happened to trigger a cold
+start; a queued job otherwise only advances as an accidental side effect
+of unrelated traffic and can get permanently stuck once that invocation
+is frozen. Verified live: a queued job froze at 71% indefinitely with no
+further requests hitting the app.
+
+The fix in place today is `POST /api/cron/process-jobs`
+(`src/app/api/cron/process-jobs/route.ts`), authenticated with a
+`CRON_SECRET` bearer token, called every 5 minutes by
+`.github/workflows/process-jobs-cron.yml` (GitHub Actions — free,
+no extra hosting). It drains up to 25 queued jobs per call within an
+8-second budget (safely under Vercel Hobby's 10s function timeout).
+GitHub's `schedule` trigger is best-effort, not exact — expect jobs to
+start within roughly 5 minutes of being queued, not instantly. Fine for
+MVP-stage volume given the mock pipeline completes each job in well
+under a second once claimed; **not** a substitute for a real standalone
+worker process (Fly.io, Railway, a small VPS) once either volume or
+per-job duration (a real reconstruction engine, not the mock) makes a
+5-minute worst-case latency unacceptable.
+
+Required: `CRON_SECRET` set as a Vercel production env var, and the
+same value added as a GitHub repository secret
+(Settings → Secrets and variables → Actions → `CRON_SECRET`). Also set
+`DISABLE_INPROCESS_WORKER=1` on Vercel so the pointless in-function
+poller doesn't start on every cold start.
+
 ## Environment variables
 
 See `.env.example` for the full annotated list. At minimum for
