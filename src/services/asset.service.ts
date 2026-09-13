@@ -5,6 +5,8 @@ import { requireProjectAccess } from "@/lib/permissions";
 import { assertStorageBudget } from "@/lib/quotas";
 import { getStorageProvider } from "@/providers/storage";
 import { recordUsage } from "@/services/usage.service";
+import { redactFaces } from "@/services/redaction.service";
+import { logger } from "@/lib/logger";
 import type { AssetKind } from "@/types";
 
 const THUMBNAIL_WIDTH = 480;
@@ -49,11 +51,30 @@ export async function uploadAsset(
   const kind = detectKind(file.mimeType);
   await assertStorageBudget(project.organizationId, file.buffer.byteLength);
 
+  // Redact recognizable faces before anything is persisted — a photo of a
+  // hotel lobby with a real bystander's or staff member's face in it is
+  // personal data, and this needs to happen before the very first write,
+  // not as a later cleanup step (execution-plan classification: legal
+  // requirement, not deferred). Video isn't covered by this pass — per-frame
+  // redaction is a materially bigger job (docs/rd-blueprint-classification.md).
+  // A redaction failure (the detector/model itself breaking) does not block
+  // the upload — matching the existing tolerance for corrupt images below —
+  // but is logged loudly since, unlike a skipped thumbnail, a missed
+  // redaction is a real privacy exposure, not just a cosmetic gap.
+  let uploadBuffer = file.buffer;
+  if (kind === "PHOTO") {
+    try {
+      uploadBuffer = await redactFaces(file.buffer);
+    } catch (error) {
+      logger.warn("asset.redaction_failed", { projectId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   const storage = getStorageProvider();
   const safeName = file.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
   const key = `${projectId}/${spaceId ?? "unassigned"}/${Date.now()}-${safeName}`;
 
-  const ref = await storage.putObject({ bucket: "original", key, data: file.buffer, contentType: file.mimeType });
+  const ref = await storage.putObject({ bucket: "original", key, data: uploadBuffer, contentType: file.mimeType });
 
   // Real metadata extraction + a real thumbnail for photos (§9 Asset
   // System: original vs derived variants must never be conflated). Videos
@@ -65,7 +86,7 @@ export async function uploadAsset(
   let thumbnailKey: string | null = null;
   if (kind === "PHOTO") {
     try {
-      const image = sharp(file.buffer);
+      const image = sharp(uploadBuffer);
       const metadata = await image.metadata();
       width = metadata.width ?? null;
       height = metadata.height ?? null;
