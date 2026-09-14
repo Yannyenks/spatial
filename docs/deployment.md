@@ -117,10 +117,45 @@ Mechanics worth knowing before relying on this:
 ## CI (execution-plan §73)
 
 `.github/workflows/ci.yml` runs lint → typecheck → unit/integration
-tests → build on every push/PR to `main`. It intentionally does not run
-an E2E suite — there isn't a committed one yet (see the feature audit);
-the Playwright-driven checks used while building several features in
-this session were ad hoc, not saved as a maintained suite.
+tests → build on every push/PR to `main`.
+
+## E2E suite
+
+`npm run test:e2e` (Playwright) covers the actual critical path by
+driving a real browser against a real running instance of the app —
+register → create a project → capture → upload (through real face
+redaction) → process → publish → view the public experience — plus two
+targeted regression tests (the restore-version-button and command-palette
+navigation bugs found and fixed earlier). This replaces the ad hoc,
+throwaway Playwright scripts used while building those fixes with a
+real, maintained suite that locks them in.
+
+It runs against `next dev` on its own port (3100) and its own disposable
+SQLite database (`tests/e2e/prepare-db.ts` resets it before every run),
+never the one a person is actually using locally.
+
+**Not yet wired into `ci.yml`.** `next dev` compiles each route on its
+first hit, and this suite — deliberately exercising the app the way a
+real user would — hits many routes for the first time in a single run;
+that cumulative cost is real (a full run currently takes ~3-4 minutes on
+this machine) and the retries in `critical-path.spec.ts` /
+`restore-version.spec.ts` exist specifically to absorb an observed `next
+dev` quirk (a request body occasionally lost if it's the very first hit
+to a route while that route is still compiling). Both characteristics
+were tuned against this one machine's timing; a CI runner's hardware,
+load, and disk I/O all differ enough that the same timeouts might not
+hold, and finding that out unsupervised inside a blocking CI gate is the
+wrong place to discover it. Run it locally for now (`npm run test:e2e`,
+or `npm run test:e2e:ui` to watch it), and validate it in an actual CI
+run before adding it to the required workflow.
+
+One `next.config.ts` fix came out of building this suite and applies
+everywhere, not just to E2E: the dev server's file watcher was treating
+writes to the local SQLite file and local-disk storage directory as
+"source changed" and firing a disruptive Fast Refresh reload mid-request
+— real, reproducible, and not specific to the test harness. Both paths
+are now excluded from webpack's `watchOptions` (see `webpack()` in
+`next.config.ts`).
 
 ## Known dependency advisories
 

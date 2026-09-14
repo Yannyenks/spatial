@@ -50,5 +50,10 @@ tests/test.db
 # (the ffmpeg-encoded output) ships to the app; see scripts/encode-videos.sh
 /source-videos/
 
+# Playwright E2E — tests/e2e/e2e.db is also covered by the *.db rule above
+/playwright-report/
+/test-results/
+/blob-report/
+
 .vercel
 .env*

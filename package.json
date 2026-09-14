@@ -16,6 +16,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down"
   },
@@ -41,6 +43,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.10.5",
@@ -48,6 +51,7 @@
     "@types/react-dom": "^19.0.2",
     "eslint": "^9.18.0",
     "eslint-config-next": "15.5.25",
+    "playwright": "^1.63.0",
     "prisma": "^6.3.1",
     "sharp": "^0.33.5",
     "tailwindcss": "^4.0.0",

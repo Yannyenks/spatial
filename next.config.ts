@@ -30,6 +30,21 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/api/v1/:path*", destination: "/api/:path*" }];
   },
+  // The dev server's file watcher was picking up writes to the local
+  // SQLite file and local-disk storage directory as "source changed" and
+  // firing a full Fast Refresh reload mid-request — real symptom hit
+  // running the E2E suite (tests/e2e/e2e.db + storage/ get written on
+  // basically every API call there), not a one-off. Neither path is
+  // source code; excluding them from the watcher is the correct fix, not
+  // a workaround. No effect on `next build` (webpack watch mode isn't
+  // used there).
+  webpack(config) {
+    config.watchOptions = {
+      ...config.watchOptions,
+      ignored: ["**/storage/**", "**/*.db", "**/*.db-journal"],
+    };
+    return config;
+  },
 };
 
 export default nextConfig;
