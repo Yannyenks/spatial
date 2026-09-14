@@ -130,7 +130,20 @@ export async function uploadAsset(
   }
 
   const thumbnailUrl = thumbnailKey ? await storage.getUrl("thumbnails", thumbnailKey) : null;
-  return { ...asset, url: ref.url, thumbnailUrl };
+
+  // Face redaction above only covers photos (kind === "PHOTO"). Per-frame
+  // video redaction needs a real async pipeline (frame extraction, per-frame
+  // detection + tracking, re-encoding) and — realistically — the same GPU
+  // job infrastructure the reconstruction engine will eventually need, not
+  // a bolted-on serverless job; see docs/rd-blueprint-classification.md.
+  // Rather than silently publish an un-redacted video, surface this so the
+  // uploader can make an informed call before it goes live.
+  const privacyWarning =
+    kind === "VIDEO"
+      ? "Faces in videos are not auto-redacted yet (only photos are). Review this video manually before publishing if it may show identifiable people."
+      : null;
+
+  return { ...asset, url: ref.url, thumbnailUrl, privacyWarning };
 }
 
 export async function listAssets(userId: string, projectId: string, spaceId?: string) {
