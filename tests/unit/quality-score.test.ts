@@ -46,4 +46,44 @@ describe("computeQualityScore", () => {
     });
     expect(score.recommendations.some((r) => r.toLowerCase().includes("connect"))).toBe(false);
   });
+
+  it("derives geometry from real depth stats when a real engine supplies them", () => {
+    const flatSurface = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+      depthAverageStdDev: 5, // below the floor — near-zero real spatial signal
+      depthSampledCount: 4,
+    });
+    const wellCapturedRoom = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+      depthAverageStdDev: 70, // at the ceiling — real depth range captured
+      depthSampledCount: 4,
+    });
+    expect(flatSurface.geometry).toBeLessThan(wellCapturedRoom.geometry);
+    expect(wellCapturedRoom.geometry).toBe(100);
+    expect(flatSurface.recommendations.some((r) => r.toLowerCase().includes("depth variation"))).toBe(true);
+  });
+
+  it("falls back to the count-based estimate when no real depth samples exist", () => {
+    const withoutDepth = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+    });
+    const withZeroSamples = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+      depthAverageStdDev: 70,
+      depthSampledCount: 0, // every depth call failed — no real signal despite the field being present
+    });
+    expect(withZeroSamples.geometry).toBe(withoutDepth.geometry);
+  });
 });

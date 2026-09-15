@@ -57,3 +57,9 @@ tests/test.db
 
 .vercel
 .env*
+# .env.example is a safe, secret-free template meant to be committed —
+# the blanket .env* rules above (this project's own, and one Vercel CLI
+# appended automatically) were silently excluding it too, so it had
+# never actually made it into the repo despite docs/deployment.md
+# pointing to it as the source of truth for required env vars.
+!.env.example

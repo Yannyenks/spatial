@@ -167,11 +167,17 @@ export async function runPipelineJob(job: AIJobRecord): Promise<void> {
     const connectionCount = await db.spaceConnection.count({
       where: { OR: [{ fromSpaceId: job.spaceId }, { toSpaceId: job.spaceId }] },
     });
+    const depthMetadata = result.scene.metadata as {
+      depthAverageStdDev?: number | null;
+      depthSampledCount?: number;
+    } | null;
     const qualityScore = computeQualityScore({
       assetCount: assets.length,
       hasReconstructionOutput: true,
       hotspotCount,
       connectionCount,
+      depthAverageStdDev: depthMetadata?.depthAverageStdDev,
+      depthSampledCount: depthMetadata?.depthSampledCount,
     });
     await db.reconstruction.update({
       where: { id: reconstruction.id },
