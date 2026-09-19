@@ -75,6 +75,29 @@ same value added as a GitHub repository secret
 `DISABLE_INPROCESS_WORKER=1` on Vercel so the pointless in-function
 poller doesn't start on every cold start.
 
+### Real camera-pose estimation (COLMAP via GitHub Actions)
+
+Same "app dispatches a GitHub Actions workflow" shape as the cron job
+above, but the other direction: the app *triggers*
+`.github/workflows/estimate-camera-pose.yml` (via a "Estimate real
+camera pose" button on a space, free-tier plan step B1 —
+docs/free-tier-roadmap.md) instead of the workflow calling the app on a
+schedule. Three things need setting up together:
+
+- `GITHUB_DISPATCH_TOKEN`: a GitHub personal access token (fine-grained,
+  `actions: write` on this repo only) as a Vercel production env var —
+  the app uses this to call GitHub's workflow-dispatch API.
+- `GITHUB_REPO`: `"owner/repo"` for this repository, also on Vercel.
+- `CAMERA_POSE_SECRET`: any random value, set **both** as a Vercel
+  production env var and as a GitHub repository secret of the same
+  name — the workflow uses it to authenticate its callbacks to
+  `/api/internal/camera-pose-jobs/*`, the same bearer-secret pattern
+  `CRON_SECRET` already uses.
+
+`vars.APP_URL` (a GitHub Actions repository *variable*, not secret) can
+override which app URL the workflow calls back to; it otherwise
+defaults to the production URL, same as `process-jobs-cron.yml`.
+
 ## Environment variables
 
 See `.env.example` for the full annotated list. At minimum for

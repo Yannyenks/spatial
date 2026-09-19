@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { HotspotManager } from "@/components/spaces/hotspot-manager";
 import { RelationManager } from "@/components/spaces/relation-manager";
 import { CameraPoseViewer } from "@/components/spaces/camera-pose-viewer";
+import { CameraPoseTrigger } from "@/components/spaces/camera-pose-trigger";
 import type { QualityScore } from "@/types";
 
 export default async function SpaceDetailPage({
@@ -102,6 +103,7 @@ export default async function SpaceDetailPage({
             <div className="mt-3">
               <CameraPoseViewer poses={scene.cameraPoses} source={cameraPoseSource} />
             </div>
+            <CameraPoseTrigger projectId={projectId} spaceId={spaceId} />
           </CardContent>
         </Card>
       )}

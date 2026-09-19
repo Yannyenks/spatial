@@ -281,6 +281,28 @@ model CameraPose {
   @@index([sceneId])
 }
 
+/**
+ * Tracks a real structure-from-motion (COLMAP) run for one space, executed
+ * async on a GitHub Actions runner rather than inline in the synchronous
+ * AIJob pipeline — COLMAP on CPU-only hardware takes minutes, far past
+ * what a single pipeline stage or a serverless request can block on
+ * (free-tier plan step B1, docs/free-tier-roadmap.md). Deliberately
+ * separate from AIJob: this replaces one space's placeholder camera-pose
+ * ring with real measured poses, it doesn't run the reconstruction
+ * pipeline itself.
+ */
+model CameraPoseJob {
+  id          String    @id @default(cuid())
+  projectId   String
+  spaceId     String
+  status      String    @default("QUEUED") // QUEUED | RUNNING | COMPLETED | FAILED
+  error       String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([spaceId])
+}
+
 model SpatialObjectRecord {
   id         String  @id @default(cuid())
   sceneId    String

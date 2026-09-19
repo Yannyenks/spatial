@@ -96,22 +96,39 @@ compute on a free interactive platform, run by a person, not a
 push-button pipeline. That's a legitimate "test version" workflow, just
 not yet a polished product feature.
 
-### B1. Real camera pose (structure-from-motion)
+### B1. Real camera pose (structure-from-motion) — DONE
 **Replaces:** the synthesized placeholder camera-position ring.
-**How:** COLMAP (open source, the field standard) run against a small
-test scene's photos. Two free options:
-- GitHub Actions runner (free minutes on this repo) — CPU-only, slow,
-  but fully scriptable: a workflow takes photos from R2, runs COLMAP,
-  writes real camera poses back to the database. Fully automatable,
-  just slow (CPU SfM on a handful of photos: minutes, not seconds).
-- Google Colab / Kaggle free T4 GPU notebook — faster, but manual: a
-  person uploads the photo set, runs the notebook, downloads the
-  camera-pose output, and it's imported back into the app.
-**Effort:** high. Recommend starting with the GitHub Actions path since
-it's the only one that stays fully automated end-to-end.
-**Verified:** multiple maintained open-source COLMAP/gsplat Colab
-notebooks confirm this is a well-trodden, working free pattern.
-[docs.gsplat.studio/main/examples/colmap.html]
+**Shipped as:** `.github/workflows/estimate-camera-pose.yml`, dispatched
+from a new "Estimate real camera pose" button on the space detail page
+(`src/services/camera-pose.service.ts`, `CameraPoseJob` model). Fully
+automated end to end on GitHub's free CPU-only runners: `apt-get install
+colmap` (no build-from-source needed), fetches the space's real photos
+via a shared-secret-authenticated endpoint, runs
+`feature_extractor` → `exhaustive_matcher` → `mapper`, converts the
+sparse model to TXT, and a small Python script
+(`scripts/colmap/report_result.py`) converts COLMAP's quaternion +
+translation output into real world-space camera centers and Euler
+rotations (`C = -Rᵀt`, the standard SfM convention — verified against
+known test cases, not just assumed) before reporting back to the app.
+
+Found and fixed a real, pre-existing product gap while scoping this:
+`CameraPose` rows have been written by every reconstruction engine
+since the mock, but displayed nowhere — so a minimal 3D viewer
+(`src/components/spaces/camera-pose-viewer.tsx`, vanilla three.js) shipped
+first, verified against a real rendered screenshot, so this work has
+something to actually show.
+
+Deliberately NOT wired into the main synchronous AIJob pipeline — COLMAP
+takes several minutes even on a small photo set, which no pipeline stage
+or serverless request should block on. Needs a GitHub PAT
+(`GITHUB_DISPATCH_TOKEN`) with `actions:write` on this repo, which only
+the repo owner can create — the one piece of this step that isn't
+purely automatable from here.
+**Verified:** COLMAP's `apt install colmap` availability on Ubuntu
+confirmed via its own install docs; the quaternion/camera-center math
+verified against known identity/rotation test cases before being
+trusted with real COLMAP output.
+[colmap.github.io/install.html] [docs.gsplat.studio/main/examples/colmap.html]
 
 ### B2. Real 3D Gaussian Splatting
 **Replaces:** nothing existing yet — this is the actual "digital twin"

@@ -6,6 +6,7 @@ import { QuotaExceededError } from "@/lib/quotas";
 import { EmailAlreadyUsedError, InvalidCredentialsError } from "@/services/auth.service";
 import { InvalidUploadError } from "@/services/asset.service";
 import { ExperienceNotReadyError } from "@/services/experience.service";
+import { CameraPoseError } from "@/services/camera-pose.service";
 import { logger } from "@/lib/logger";
 import { REQUEST_ID_HEADER } from "@/lib/request-id";
 
@@ -55,6 +56,9 @@ export async function toApiError(error: unknown): Promise<NextResponse> {
   }
   if (error instanceof ExperienceNotReadyError) {
     return respond(422, "EXPERIENCE_NOT_READY", error.message);
+  }
+  if (error instanceof CameraPoseError) {
+    return respond(422, "CAMERA_POSE_ERROR", error.message);
   }
 
   logger.error("api.unhandled_error", {
