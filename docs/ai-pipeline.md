@@ -53,13 +53,38 @@ specific implementation directly:
 | Interface              | Env var                 | Mock implementation             | Real implementation |
 | ----------------------- | ------------------------ | -------------------------------- | -------------------- |
 | `StorageProvider`        | `STORAGE_PROVIDER`         | `LocalStorageProvider` (disk)      | `S3StorageProvider` (`s3`, R2-compatible) |
-| `ReconstructionEngine`   | `RECONSTRUCTION_PROVIDER`  | `MockReconstructionEngine`         | `ReplicateDepthEngine` (`replicate`) |
+| `ReconstructionEngine`   | `RECONSTRUCTION_PROVIDER`  | `MockReconstructionEngine`         | `ReplicateDepthEngine` (`replicate`) or `LocalDepthEngine` (`local-depth`, free) |
 | `AIProvider`             | `AI_PROVIDER`               | `MockAIProvider`                    | `NvidiaAIProvider` (`nvidia`) |
 | `VideoGenerationProvider` | `VIDEO_PROVIDER`            | `MockVideoGenerationProvider`       | — not built yet |
 
 To add a real implementation: implement the interface in a new file next
 to the mock, register it in that folder's `index.ts` under a new env
 value, and set the env var. No other file changes.
+
+### `ReconstructionEngine`: `replicate` vs. `local-depth`
+
+Both run the same Depth Anything V2 model family for real per-photo
+monocular depth estimation; they differ only in where inference runs.
+`replicate` calls Replicate's hosted API (pay-per-use, needs
+`REPLICATE_API_TOKEN` and billing enabled). `local-depth`
+(`src/providers/reconstruction/local-depth-engine.ts`) runs the small,
+int8-quantized ONNX export entirely locally via `onnxruntime-node`
+(prebuilt native binaries — no ML runtime compilation needed, unlike
+`@tensorflow/tfjs-node`), reading the model committed at
+`models/depth-estimation/depth_anything_v2_small_int8.onnx`: zero API
+calls, zero billing, no credentials to configure.
+
+The two engines' raw depth-map statistics live on completely different
+numeric scales (Replicate's rendered 0-255 greyscale PNG vs. this
+model's raw float32 output), so `LocalDepthEngine` rescales its own
+output onto the same 0-255-ish range `quality-score.service.ts`'s
+`DEPTH_STDDEV_FLOOR`/`CEILING` already expect — verified against real
+images before picking the rescale constants: naively min-max-normalizing
+each image's own output was tried first and rejected (it made a
+solid-grey flat test image statistically indistinguishable from a real
+detailed room photo), and using the raw stddev instead showed a real,
+correctly-ordered difference. Both engines feed the exact same geometry
+sub-score contract, so nothing downstream needs to know which one ran.
 
 ### `AIProvider`: mock vs. `nvidia`
 

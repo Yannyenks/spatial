@@ -48,20 +48,28 @@ by NVIDIA's API.
 **Verified:** NVIDIA NIM VLM docs confirm `image_url` input over the
 standard chat-completions API. [docs.nvidia.com/nim/vision-language-models]
 
-### A2. Replace Replicate's depth estimation with a local, free model
+### A2. Replace Replicate's depth estimation with a local, free model — DONE
 **Replaces:** `ReplicateDepthEngine` (real, but needs a *paid*
 Replicate account — the opposite of "totally free").
-**How:** Run a small open-source monocular depth model (MiDaS-small or
-Depth-Anything-V2-Small, both have public ONNX exports, tens of MB) via
-`onnxruntime-node` (prebuilt binaries, no native compilation — same
-constraint-fit as `sharp`/`ffmpeg-static`) or `onnxruntime-web` (pure
-WASM, matching the `@techstark/opencv-js` pattern already used for
-YuNet). Exact same architecture already proven for face redaction:
-download the model once, commit it under `models/`, run inference
-locally, zero external API, zero billing.
-**Effort:** medium-high — new provider `LocalDepthEngine`, needs the
-same "verify against real photos before shipping" step already applied
-to blur/exposure and face detection.
+**Shipped as:** `LocalDepthEngine` (`RECONSTRUCTION_PROVIDER=local-depth`),
+running Depth Anything V2 Small's int8 ONNX export
+(`onnx-community/depth-anything-v2-small`, Apache-2.0, 27.3MB, committed
+at `models/depth-estimation/`) via `onnxruntime-node` (prebuilt native
+binaries, no compilation). ~400ms one-time session load + ~600ms/photo
+at 280×280 input — fast enough for the same 6-photo/job cap Replicate
+uses. Zero API calls, zero billing, no credentials.
+
+Verification caught a real design mistake before it shipped: the first
+approach (min-max normalize each photo's own depth output to 0-255,
+mirroring how Replicate's rendered PNG looks) made a solid-grey flat
+test image (stddev 66.6) statistically indistinguishable from a real
+detailed room photo (stddev 64.0) — per-image normalization stretches
+whatever tiny variation exists to fill the full range, destroying the
+signal. Switched to rescaling the model's *raw* stddev onto the same
+0-255-ish range instead, calibrated against three real probes (real
+room ~1.09, solid flat ~0.62, close crop ~1.30 on the raw scale) —
+correctly separated in a full end-to-end run through the actual
+`ReconstructionEngine` interface (real room: 48.2, flat: 14.7).
 **Verified:** Hugging Face's free Inference API was checked as a
 simpler alternative and rejected — it's now credit-limited
 ($0.10/month) and gives no reliable guarantee for a specific model, so
