@@ -7,6 +7,7 @@ import { getStorageProvider } from "@/providers/storage";
 import { recordUsage } from "@/services/usage.service";
 import { redactFaces } from "@/services/redaction.service";
 import { analyzeCaptureQuality } from "@/services/capture-quality.service";
+import { analyzeVideoQuality } from "@/services/video-quality.service";
 import { logger } from "@/lib/logger";
 import type { AssetKind } from "@/types";
 
@@ -80,12 +81,24 @@ export async function uploadAsset(
   let isBlurry: boolean | null = null;
   let isUnderexposed: boolean | null = null;
   let isOverexposed: boolean | null = null;
+  let qualitySampledFrames: number | null = null;
+  let qualityFlaggedFrames: number | null = null;
   if (kind === "PHOTO") {
     const quality = await analyzeCaptureQuality(uploadBuffer);
     qualityWarning = quality?.warning ?? null;
     isBlurry = quality?.isBlurry ?? null;
     isUnderexposed = quality?.isUnderexposed ?? null;
     isOverexposed = quality?.isOverexposed ?? null;
+  } else if (kind === "VIDEO") {
+    // Same blur/exposure signal as photos, sampled across a handful of
+    // frames (video-quality.service.ts) rather than per-pixel-perfect
+    // full-video analysis — classical CV, no GPU needed, so this stays
+    // well within a serverless request's time budget unlike face
+    // redaction (docs/rd-blueprint-classification.md).
+    const quality = await analyzeVideoQuality(uploadBuffer);
+    qualityWarning = quality?.warning ?? null;
+    qualitySampledFrames = quality?.sampledFrames ?? null;
+    qualityFlaggedFrames = quality?.flaggedFrames ?? null;
   }
 
   const storage = getStorageProvider();
@@ -141,6 +154,8 @@ export async function uploadAsset(
       isBlurry,
       isUnderexposed,
       isOverexposed,
+      qualitySampledFrames,
+      qualityFlaggedFrames,
     },
   });
 

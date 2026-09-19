@@ -16,6 +16,15 @@ const nextConfig: NextConfig = {
   // needs (execution-plan §75: Docker Compose local dev / deployment) —
   // see Dockerfile. Has no effect on `next dev`.
   output: "standalone",
+  // ffmpeg-static resolves its bundled binary's path from `__dirname` at
+  // require-time. Left to webpack's default bundling, that require gets
+  // inlined into the server chunk and `__dirname` no longer points at
+  // node_modules/ffmpeg-static — the binary path silently becomes wrong
+  // and every spawn() fails with ENOENT (caught and swallowed by
+  // video-quality.service.ts's error handling, so this failed silently
+  // until verified end-to-end via a real video upload). Keeping it as a
+  // real runtime `require()` instead of bundling it is the fix.
+  serverExternalPackages: ["ffmpeg-static"],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

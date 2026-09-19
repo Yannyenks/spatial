@@ -225,6 +225,12 @@ model Asset {
   isBlurry        Boolean?
   isUnderexposed  Boolean?
   isOverexposed   Boolean?
+  // Same signal for VIDEO assets (src/services/video-quality.service.ts):
+  // a handful of sampled frames run through the same blur/exposure
+  // analysis. Null means "not analyzed" (photo, or ffmpeg/analysis
+  // failed); 0/0 is a real "analyzed, sampled zero usable frames" result.
+  qualitySampledFrames Int?
+  qualityFlaggedFrames Int?
   createdAt       DateTime @default(now())
 
   @@index([projectId])

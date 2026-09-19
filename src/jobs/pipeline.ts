@@ -171,8 +171,16 @@ export async function runPipelineJob(job: AIJobRecord): Promise<void> {
       depthAverageStdDev?: number | null;
       depthSampledCount?: number;
     } | null;
+    // Real per-photo flags plus real per-frame video sample counts, pooled
+    // into one clean-fraction signal for visualQuality (quality-score.service.ts) —
+    // the same real-signal-over-heuristic pattern already used for geometry/depth.
     const analyzedPhotos = assetRows.filter((a) => a.kind === "PHOTO" && a.isBlurry !== null);
     const flaggedPhotos = analyzedPhotos.filter((a) => a.isBlurry || a.isUnderexposed || a.isOverexposed);
+    const analyzedVideos = assetRows.filter((a) => a.kind === "VIDEO" && a.qualitySampledFrames !== null);
+    const visualQualitySampledCount =
+      analyzedPhotos.length + analyzedVideos.reduce((sum, a) => sum + (a.qualitySampledFrames ?? 0), 0);
+    const visualQualityFlaggedCount =
+      flaggedPhotos.length + analyzedVideos.reduce((sum, a) => sum + (a.qualityFlaggedFrames ?? 0), 0);
     const qualityScore = computeQualityScore({
       assetCount: assets.length,
       hasReconstructionOutput: true,
@@ -180,8 +188,8 @@ export async function runPipelineJob(job: AIJobRecord): Promise<void> {
       connectionCount,
       depthAverageStdDev: depthMetadata?.depthAverageStdDev,
       depthSampledCount: depthMetadata?.depthSampledCount,
-      visualQualityFlaggedCount: flaggedPhotos.length,
-      visualQualitySampledCount: analyzedPhotos.length,
+      visualQualityFlaggedCount,
+      visualQualitySampledCount,
     });
     await db.reconstruction.update({
       where: { id: reconstruction.id },
