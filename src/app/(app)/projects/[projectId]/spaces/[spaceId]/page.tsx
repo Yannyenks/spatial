@@ -9,6 +9,8 @@ import { HotspotManager } from "@/components/spaces/hotspot-manager";
 import { RelationManager } from "@/components/spaces/relation-manager";
 import { CameraPoseViewer } from "@/components/spaces/camera-pose-viewer";
 import { CameraPoseTrigger } from "@/components/spaces/camera-pose-trigger";
+import { SplatViewer } from "@/components/spaces/splat-viewer";
+import { SplatUploader } from "@/components/spaces/splat-uploader";
 import type { QualityScore } from "@/types";
 
 export default async function SpaceDetailPage({
@@ -95,6 +97,29 @@ export default async function SpaceDetailPage({
           </CardContent>
         </Card>
       </div>
+
+      {reconstruction?.method === "GAUSSIAN_SPLATTING" && reconstruction.outputUri && (
+        <Card>
+          <CardContent className="pt-5">
+            <h2 className="text-sm font-semibold">3D Splat</h2>
+            <div className="mt-3">
+              <SplatViewer url={reconstruction.outputUri} />
+            </div>
+            <SplatUploader projectId={projectId} spaceId={spaceId} />
+          </CardContent>
+        </Card>
+      )}
+      {reconstruction?.method !== "GAUSSIAN_SPLATTING" && (
+        <Card>
+          <CardContent className="pt-5">
+            <h2 className="text-sm font-semibold">3D Splat</h2>
+            <p className="mt-1 text-sm text-[var(--fg-muted)]">
+              No real 3D splat for this space yet — train one for free and upload it below.
+            </p>
+            <SplatUploader projectId={projectId} spaceId={spaceId} />
+          </CardContent>
+        </Card>
+      )}
 
       {scene && scene.cameraPoses.length > 0 && (
         <Card>

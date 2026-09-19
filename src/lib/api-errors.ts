@@ -7,6 +7,7 @@ import { EmailAlreadyUsedError, InvalidCredentialsError } from "@/services/auth.
 import { InvalidUploadError } from "@/services/asset.service";
 import { ExperienceNotReadyError } from "@/services/experience.service";
 import { CameraPoseError } from "@/services/camera-pose.service";
+import { InvalidSplatUploadError } from "@/services/splat.service";
 import { logger } from "@/lib/logger";
 import { REQUEST_ID_HEADER } from "@/lib/request-id";
 
@@ -59,6 +60,9 @@ export async function toApiError(error: unknown): Promise<NextResponse> {
   }
   if (error instanceof CameraPoseError) {
     return respond(422, "CAMERA_POSE_ERROR", error.message);
+  }
+  if (error instanceof InvalidSplatUploadError) {
+    return respond(422, "INVALID_SPLAT_UPLOAD", error.message);
   }
 
   logger.error("api.unhandled_error", {

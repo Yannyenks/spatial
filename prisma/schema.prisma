@@ -399,6 +399,16 @@ model Reconstruction {
   status        String   @default("QUEUED") // JobStatus
   qualityJson   String?
   outputUri     String?
+  // Set alongside outputUri only when the output is a real, directly
+  // downloadable file (e.g. an uploaded Gaussian Splat — free-tier plan
+  // step B2). `outputUri` from a StorageProvider.putObject() call is a
+  // presigned URL with a default 6-hour expiry: fine for the mock/depth
+  // engines (never actually fetched later by a browser), but a real bug
+  // waiting to happen for a file a viewer loads on demand, possibly days
+  // after upload. Callers that need long-term access re-derive a fresh
+  // URL from these instead of trusting the stored outputUri.
+  outputBucket  String?
+  outputKey     String?
   isCurrent     Boolean  @default(false)
   createdAt     DateTime @default(now())
 

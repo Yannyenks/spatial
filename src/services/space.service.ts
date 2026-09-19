@@ -2,7 +2,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { requireProjectAccess } from "@/lib/permissions";
 import { assertCanCreateSpace } from "@/lib/quotas";
-import type { HotspotType, SpaceKind } from "@/types";
+import { getStorageProvider } from "@/providers/storage";
+import type { HotspotType, SpaceKind, StorageBucket } from "@/types";
 
 export async function createSpace(
   userId: string,
@@ -40,7 +41,21 @@ export async function getSpaceDetail(userId: string, projectId: string, spaceId:
     db.spaceConnection.findMany({ where: { toSpaceId: spaceId }, include: { fromSpace: true } }),
     db.aIJob.findMany({ where: { spaceId }, orderBy: { createdAt: "desc" }, take: 5 }),
   ]);
-  return { space, assets, scene, reconstruction, hotspots, connectionsFrom, connectionsTo, jobs };
+
+  // A stored outputUri is a presigned URL with a default 6-hour expiry
+  // (StorageProvider.putObject()) — fine for engines whose output is
+  // never fetched later, but a real bug for a file (e.g. an uploaded
+  // Gaussian Splat, free-tier plan step B2) a viewer loads on demand,
+  // possibly days after upload. Re-derive a fresh URL from the real
+  // bucket/key on every read instead of trusting the stored one.
+  let liveReconstruction = reconstruction;
+  if (reconstruction?.outputBucket && reconstruction.outputKey) {
+    const storage = getStorageProvider();
+    const freshUrl = await storage.getUrl(reconstruction.outputBucket as StorageBucket, reconstruction.outputKey);
+    liveReconstruction = { ...reconstruction, outputUri: freshUrl };
+  }
+
+  return { space, assets, scene, reconstruction: liveReconstruction, hotspots, connectionsFrom, connectionsTo, jobs };
 }
 
 export async function connectSpaces(userId: string, projectId: string, fromSpaceId: string, toSpaceId: string, label?: string) {

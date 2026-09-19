@@ -160,19 +160,51 @@ verified against known identity/rotation test cases before being
 trusted with real COLMAP output.
 [colmap.github.io/install.html] [docs.gsplat.studio/main/examples/colmap.html]
 
-### B2. Real 3D Gaussian Splatting
+### B2. Real 3D Gaussian Splatting — DONE (app side); training stays manual
 **Replaces:** nothing existing yet — this is the actual "digital twin"
 payoff the platform doesn't have today.
-**How:** `gsplat` (open source, CUDA) trained on the COLMAP output from
-B1, on a free Colab/Kaggle T4 GPU notebook. Output is a real `.ply`/
-splat file, uploaded back into the app's storage and served by an
-existing open-source WebGL splat viewer.
-**Effort:** high, and the least automatable step in this whole plan —
-realistically a manual notebook run per test scene for now, not a job
-the app itself triggers.
+**Shipped as:** a real upload + render pipeline. `SplatUploader`
+(space detail page → "3D Splat" card) accepts a `.ply`/`.splat`/
+`.ksplat` file and stores it via `src/services/splat.service.ts` as a
+new `Reconstruction` row (`method: "GAUSSIAN_SPLATTING"`,
+`provider: "manual-upload"`) — reusing the exact versioning/restore
+machinery every other reconstruction method already has, not a
+one-off table. `SplatViewer` renders it with
+`@mkkellogg/gaussian-splats-3d`, a maintained open-source Three.js-based
+renderer (reusing an existing WebGL splat renderer rather than building
+one, per `docs/rd-blueprint-classification.md`'s own call).
+
+The actual **training** step (`gsplat` on a free Colab/Kaggle T4 GPU
+notebook) stays manual — verified while scoping this that no provider,
+free or paid, hosts splat training as a simple API call; a Colab
+notebook run is the honest free path, documented step by step in
+`docs/gaussian-splatting-guide.md`.
+
+A real, non-obvious bug found only by testing the upload live, not
+assumed from reading the storage code: `StorageProvider.putObject()`
+returns a presigned URL with a default 6-hour expiry. Every other
+engine's `outputUri` is written once and never fetched again later, so
+this never surfaced before — but a splat file is loaded by a viewer on
+demand, potentially days after upload, so a stale stored URL would have
+silently 403'd. Fixed by adding `Reconstruction.outputBucket`/`outputKey`
+alongside `outputUri`, and re-deriving a fresh URL from those on every
+read (`space.service.ts#getSpaceDetail`) rather than trusting what was
+stored at upload time.
+
+Verified end to end through the real app UI, not just the library in
+isolation: reverse-engineered the exact PLY property schema
+(`scale_0..2`, `rot_0..3`, `f_dc_0..2`, `opacity` — with `scale = exp(raw)`,
+`opacity = sigmoid(raw)`, `color = (0.5 + 0.28209479177387814 * f_dc) * 255`)
+from the renderer library's own minified source rather than guessing
+from docs, hand-built a tiny 5-point test PLY, confirmed it rendered as
+real colored volumetric blobs (not a blank canvas) in a standalone
+harness first, then uploaded that same file through the actual running
+app and confirmed the space detail page rendered it identically.
 **Verified:** several actively maintained free-Colab-T4
-Gaussian-Splatting repos exist and are reported working today.
-[github.com/tianxingleo/3DGS-Colab-Free-T4]
+Gaussian-Splatting repos exist and are reported working today (the
+manual training step); the render pipeline itself verified with a real
+hand-built test file through both a standalone harness and the live app.
+[github.com/tianxingleo/3DGS-Colab-Free-T4] [github.com/mkkellogg/GaussianSplats3D]
 
 ## Explicitly out of scope even at $0
 
