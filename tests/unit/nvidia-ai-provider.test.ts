@@ -49,7 +49,7 @@ describe("NvidiaAIProvider.answerConciergeQuestion", () => {
     vi.unstubAllGlobals();
   });
 
-  const provider = new NvidiaAIProvider("fake-key", "meta/llama-3.1-8b-instruct");
+  const provider = new NvidiaAIProvider("fake-key", "meta/llama-3.2-11b-vision-instruct");
   const spaces = [
     space({ id: "s1", name: "Pool Deck", kind: "POOL" }),
     space({ id: "s2", name: "Suite 204", kind: "SUITE" }),
@@ -163,28 +163,49 @@ describe("NvidiaAIProvider.analyzeScene", () => {
   });
 
   const provider = new NvidiaAIProvider("fake-key");
+  const API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+
+  /**
+   * The real implementation fetches each photo URL first (to re-encode as
+   * a base64 data URI — see nvidia-ai-provider.ts for why a remote URL
+   * alone isn't enough for this model) and only then calls the chat
+   * completions API. This mock distinguishes the two by URL so tests can
+   * control each independently, rather than assuming the code makes only
+   * one fetch per photo.
+   */
+  function stubImageAndChat(opts: {
+    imageOk?: boolean;
+    chatContentForUrl?: (imageUrl: string) => string | null;
+    chatOk?: boolean;
+  }) {
+    const chatCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === API_URL) {
+          const body = JSON.parse(init!.body as string);
+          const dataUri = body.messages[1].content[1].image_url.url as string;
+          chatCalls.push(dataUri);
+          if (opts.chatOk === false) return new Response("rate limited", { status: 429 });
+          const content = opts.chatContentForUrl ? opts.chatContentForUrl(dataUri) : "[]";
+          return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+        }
+        // Image download.
+        if (opts.imageOk === false) return new Response("not found", { status: 404 });
+        return new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } });
+      })
+    );
+    return chatCalls;
+  }
 
   it("keeps the deterministic low-frame-count check regardless of vision results", async () => {
-    stubChatResponse("[]");
+    stubImageAndChat({});
     const result = await provider.analyzeScene({ spaceId: "space-1", frameUrls: ["a", "b"], sampleImageUrls: [] });
     expect(result.warnings).toContain("Low frame count may reduce scene understanding accuracy.");
   });
 
   it("merges real per-photo issues from the vision model, deduplicated", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init: RequestInit) => {
-        const body = JSON.parse(init.body as string);
-        const imageUrl = body.messages[1].content[1].image_url.url;
-        const issues =
-          imageUrl === "https://example.com/photo-1.jpg"
-            ? ["The room looks poorly lit."]
-            : ["The room looks poorly lit."]; // same real issue seen in both photos
-        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(issues) } }] }), {
-          status: 200,
-        });
-      })
-    );
+    stubImageAndChat({ chatContentForUrl: () => JSON.stringify(["The room looks poorly lit."]) });
 
     const result = await provider.analyzeScene({
       spaceId: "space-1",
@@ -195,8 +216,8 @@ describe("NvidiaAIProvider.analyzeScene", () => {
     expect(result.warnings).toEqual(["The room looks poorly lit."]);
   });
 
-  it("only sends real image URLs to the model, never fabricates issues when the model returns an empty array", async () => {
-    stubChatResponse(JSON.stringify([]));
+  it("never fabricates issues when the model returns an empty array", async () => {
+    stubImageAndChat({ chatContentForUrl: () => "[]" });
     const result = await provider.analyzeScene({
       spaceId: "space-1",
       frameUrls: Array.from({ length: 10 }, (_, i) => `frame-${i}`),
@@ -205,8 +226,18 @@ describe("NvidiaAIProvider.analyzeScene", () => {
     expect(result.warnings).toEqual([]);
   });
 
-  it("degrades to no vision warnings (never crashes) when the vision call fails", async () => {
-    stubChatResponse(null, false);
+  it("degrades to no vision warnings (never crashes) when downloading the photo fails", async () => {
+    stubImageAndChat({ imageOk: false });
+    const result = await provider.analyzeScene({
+      spaceId: "space-1",
+      frameUrls: Array.from({ length: 10 }, (_, i) => `frame-${i}`),
+      sampleImageUrls: ["https://example.com/photo-1.jpg"],
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("degrades to no vision warnings (never crashes) when the chat completion call fails", async () => {
+    stubImageAndChat({ chatOk: false });
     const result = await provider.analyzeScene({
       spaceId: "space-1",
       frameUrls: Array.from({ length: 10 }, (_, i) => `frame-${i}`),
@@ -216,7 +247,7 @@ describe("NvidiaAIProvider.analyzeScene", () => {
   });
 
   it("degrades to no vision warnings when the model returns unparseable content", async () => {
-    stubChatResponse("looks fine to me!");
+    stubImageAndChat({ chatContentForUrl: () => "looks fine to me!" });
     const result = await provider.analyzeScene({
       spaceId: "space-1",
       frameUrls: Array.from({ length: 10 }, (_, i) => `frame-${i}`),
@@ -226,14 +257,7 @@ describe("NvidiaAIProvider.analyzeScene", () => {
   });
 
   it("never sends more than the sample cap worth of vision requests", async () => {
-    const calls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init: RequestInit) => {
-        calls.push(init.body as string);
-        return new Response(JSON.stringify({ choices: [{ message: { content: "[]" } }] }), { status: 200 });
-      })
-    );
+    const chatCalls = stubImageAndChat({});
 
     await provider.analyzeScene({
       spaceId: "space-1",
@@ -241,7 +265,7 @@ describe("NvidiaAIProvider.analyzeScene", () => {
       sampleImageUrls: ["u1", "u2", "u3", "u4", "u5"],
     });
 
-    expect(calls.length).toBe(2); // MAX_SCENE_VISION_SAMPLES
+    expect(chatCalls.length).toBe(2); // MAX_SCENE_VISION_SAMPLES
   });
 });
 

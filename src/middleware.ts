@@ -12,10 +12,20 @@ import { REQUEST_ID_HEADER } from "@/lib/request-id";
  * proves the request didn't originate from a page we served.
  *
  * Only applies to mutating methods, and only when a session cookie is
- * actually present — public unauthenticated endpoints (analytics events,
- * the visitor AI concierge, password verification) never carry the
- * session cookie and are unaffected. Runs in the Edge runtime, so this
- * file (and `@/lib/cookies`) must stay free of Prisma/Node-only imports.
+ * actually present — meant to exempt public unauthenticated endpoints
+ * (analytics events, the visitor AI concierge, voice transcribe/speak,
+ * password verification), which never check the session cookie for
+ * authorization at all. A bare cookie-presence check isn't quite enough
+ * for that, though: a visitor who *also* happens to be logged in
+ * elsewhere in the same browser (e.g. previewing their own published
+ * listing) still carries the session cookie on these routes, and got
+ * incorrectly CSRF-blocked — caught live while building the voice
+ * feature (free-tier roadmap step A3), a real bug, not new to this
+ * feature. Every route under `/api/experience/**` is public by
+ * construction (none of them call `requireUser`/`requireProjectAccess`),
+ * so the whole prefix is exempt outright rather than patched route by
+ * route. Runs in the Edge runtime, so this file (and `@/lib/cookies`)
+ * must stay free of Prisma/Node-only imports.
  *
  * Also assigns a request id (§55-57 execution-plan: error contract +
  * structured logs both need one) to every /api request, forwarded to the
@@ -31,7 +41,9 @@ export function middleware(req: NextRequest) {
   const forwardedHeaders = new Headers(req.headers);
   forwardedHeaders.set(REQUEST_ID_HEADER, requestId);
 
-  if (MUTATING_METHODS.has(req.method)) {
+  const isPublicExperienceRoute = req.nextUrl.pathname.startsWith("/api/experience/");
+
+  if (MUTATING_METHODS.has(req.method) && !isPublicExperienceRoute) {
     const sessionCookie = req.cookies.get(SESSION_COOKIE)?.value;
     if (sessionCookie) {
       const csrfCookie = req.cookies.get(CSRF_COOKIE)?.value;

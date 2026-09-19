@@ -4,11 +4,15 @@ import type { NextConfig } from "next";
 // third-party script/style sources are declared here since the app
 // serves no external embeds; tighten further (e.g. a real CSP) once
 // white-label custom domains / embedded fonts are wired up (§25).
+// `microphone=(self)` (not `()`) since the public experience viewer's
+// mic input (free-tier roadmap step A3) needs it — blocking it outright
+// broke that feature at the browser permissions-policy level, caught via
+// a live end-to-end test, not assumed from reading the code.
 const securityHeaders = [
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
 ];
 
 const nextConfig: NextConfig = {

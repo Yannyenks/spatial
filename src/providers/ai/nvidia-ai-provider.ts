@@ -7,15 +7,23 @@ import { logger } from "@/lib/logger";
 // OpenAI-compatible chat-completions endpoint, with a free tier of API
 // credits for evaluation — no GPU hosting decision of our own needed,
 // same "BUY the inference, BUILD the tool layer" shape as Replicate's
-// depth engine. Defaults to a small, fast instruction model: this call
-// only has to classify a question into one of four tool shapes, not
-// write long-form text, so a large model buys nothing here.
+// depth engine.
+//
+// The exact model id is verified against a live account, not assumed:
+// `meta/llama-3.1-8b-instruct` (this file's original default) returned
+// HTTP 410 Gone — deprecated 2026-08-26 — and several other
+// commonly-cited catalog entries (mistral-7b-instruct-v0.3,
+// gemma-3-12b-it, nvidia/nemotron-nano-3-30b-a3b,
+// nvidia/llama-3.1-nemotron-70b-instruct) all 404 ("not found for
+// account") despite appearing in GET /v1/models — not every listed
+// model is actually enabled for a given free-tier account.
+// `meta/llama-3.2-11b-vision-instruct` is the one confirmed live against
+// a real key for both plain chat and multimodal (image) input, so it
+// covers both roles here rather than juggling two separately-flaky
+// model ids.
 const API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
-const DEFAULT_MODEL = "meta/llama-3.1-8b-instruct";
-// A real vision-language model, also free on the same catalog, used only
-// for analyzeScene's per-photo check below. Separate from DEFAULT_MODEL
-// since a pure text model cannot accept image_url content at all.
-const DEFAULT_VISION_MODEL = "microsoft/phi-3.5-vision-instruct";
+const DEFAULT_MODEL = "meta/llama-3.2-11b-vision-instruct";
+const DEFAULT_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct";
 // Kept small: one real vision call per sampled photo, and free-tier rate
 // limits (~40 req/min) make "every photo in the space" the wrong default
 // even before considering latency — this is a spot-check, not exhaustive
@@ -23,7 +31,14 @@ const DEFAULT_VISION_MODEL = "microsoft/phi-3.5-vision-instruct";
 // and video-quality's frame sampling).
 const MAX_SCENE_VISION_SAMPLES = 2;
 
-const SCENE_VISION_SYSTEM_PROMPT = `You are reviewing a real photo captured for a hotel's spatial digital-twin listing. Look at the image and note only genuine, concrete issues a guest browsing this listing would notice in THIS photo — e.g. poor lighting, a cut-off or incomplete view of the room, visible clutter, or motion blur. Respond with ONLY a JSON array of short strings (at most 2 items). Return an empty array [] if the photo looks fine. Never invent an issue you cannot actually see in the image.`;
+// A plain "respond with a JSON array" instruction was tried first against
+// a real photo and rejected: the model returned Python-dict-style output
+// with single quotes and objects instead of plain strings — not valid
+// JSON. Giving it a concrete example of the exact shape fixed this
+// (verified against the same real photo, output flipped to a clean
+// `["Poor lighting","Visible clutter"]`), so the example stays in the
+// prompt rather than being trimmed as "obvious."
+const SCENE_VISION_SYSTEM_PROMPT = `You are reviewing a real photo captured for a hotel's spatial digital-twin listing. Note only genuine, concrete issues a guest would notice in THIS photo (poor lighting, a cut-off/incomplete view, visible clutter, motion blur). Respond with EXACTLY this format and nothing else: a JSON array of plain strings using double quotes, e.g. ["Poor lighting","Visible clutter"] — or [] if the photo looks fine. Do not wrap items in objects. Do not use single quotes. Output ONLY the JSON array, no other text. Never invent an issue you cannot actually see in the image.`;
 
 const INTENT_SYSTEM_PROMPT = `You are an intent classifier for a hotel spatial-navigation assistant.
 Given a guest's question, respond with ONLY a single JSON object (no markdown, no explanation) matching exactly one of these shapes:
@@ -144,11 +159,29 @@ export class NvidiaAIProvider implements AIProvider {
    * concrete, visible issues — never a full scene description invented
    * from a filename or storage key (§33). `imageUrl` must be a real,
    * publicly resolvable URL (an R2 presigned URL in production); a
-   * `localhost` URL from local dev storage isn't reachable by NVIDIA's
-   * API and simply fails closed via the same try/catch every other call
-   * here already has.
+   * `localhost` URL from local dev storage isn't reachable and simply
+   * fails closed via the try/catch below.
+   *
+   * Fetches and re-encodes the image as a base64 data URI before sending
+   * it — passing the remote URL directly (as NVIDIA's own published curl
+   * example does) returned a bare HTTP 500 from this model when verified
+   * against a real account; a data URI works reliably. Not every
+   * NIM-hosted vision model fetches remote URLs server-side the way
+   * OpenAI's does, despite the identical request shape.
    */
   private async analyzeImageForIssues(imageUrl: string): Promise<string[]> {
+    let dataUri: string;
+    try {
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) throw new Error(`image fetch failed: ${imgRes.status}`);
+      const contentType = imgRes.headers.get("content-type") ?? "image/jpeg";
+      const buffer = Buffer.from(await imgRes.arrayBuffer());
+      dataUri = `data:${contentType};base64,${buffer.toString("base64")}`;
+    } catch (error) {
+      logger.warn("nvidia_ai.image_fetch_failed", { error: error instanceof Error ? error.message : String(error) });
+      return [];
+    }
+
     const content = await this.chat(
       [
         { role: "system", content: SCENE_VISION_SYSTEM_PROMPT },
@@ -156,7 +189,7 @@ export class NvidiaAIProvider implements AIProvider {
           role: "user",
           content: [
             { type: "text", text: "Review this photo." },
-            { type: "image_url", image_url: { url: imageUrl } },
+            { type: "image_url", image_url: { url: dataUri } },
           ],
         },
       ],

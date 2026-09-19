@@ -45,7 +45,7 @@ to do next (§35), instead of a generic "Something went wrong."
 
 ## Providers
 
-Three provider interfaces exist under `src/providers/`, each resolved by
+Four provider interfaces exist under `src/providers/`, each resolved by
 an env var and a small registry (`getXProvider()` in each folder's
 `index.ts`) so nothing in a route, service or component imports a
 specific implementation directly:
@@ -55,6 +55,7 @@ specific implementation directly:
 | `StorageProvider`        | `STORAGE_PROVIDER`         | `LocalStorageProvider` (disk)      | `S3StorageProvider` (`s3`, R2-compatible) |
 | `ReconstructionEngine`   | `RECONSTRUCTION_PROVIDER`  | `MockReconstructionEngine`         | `ReplicateDepthEngine` (`replicate`) or `LocalDepthEngine` (`local-depth`, free) |
 | `AIProvider`             | `AI_PROVIDER`               | `MockAIProvider`                    | `NvidiaAIProvider` (`nvidia`) |
+| `VoiceProvider`          | `VOICE_PROVIDER`            | `MockVoiceProvider`                  | `NvidiaVoiceProvider` (`nvidia`, free) |
 | `VideoGenerationProvider` | `VIDEO_PROVIDER`            | `MockVideoGenerationProvider`       | — not built yet |
 
 To add a real implementation: implement the interface in a new file next
@@ -128,6 +129,29 @@ free tier available — needs `NVIDIA_API_KEY`) for three things:
 `sampleImageUrls` are supplied or every vision call fails — keeps the
 plain, honest low-frame-count check rather than fabricating a vision
 analysis that never happened (§33).
+
+### `VoiceProvider`: mock vs. `nvidia`
+
+`VOICE_PROVIDER=nvidia` (`src/providers/voice/nvidia-voice-provider.ts`)
+calls two of NVIDIA's hosted Riva NIMs — `parakeet-tdt-0.6b` for speech-
+to-text, `magpie-tts-multilingual` for text-to-speech — wired into the
+public experience viewer's concierge drawer as a mic button and a
+per-answer speaker icon.
+
+Unlike the chat/vision models, these aren't behind the shared
+`integrate.api.nvidia.com` endpoint: each is deployed at its own
+per-model NVCF invocation URL, set via `NVIDIA_ASR_URL`/`NVIDIA_TTS_URL`
+(found on that exact model's build.nvidia.com page, under its "API"
+tab — not derivable from the model name). Their language codes also
+aren't symmetric: this ASR deployment needs `en-GB` (`en-US` and plain
+`en` both 404), while TTS needs `en-US` — verified directly against a
+real account, not assumed from the request shape being otherwise
+identical.
+
+Both methods return an honest `null`/`{text: null}` on any failure —
+network error, non-2xx response — never a fabricated transcript or
+fake audio. `MockVoiceProvider` does the same unconditionally, since no
+speech model is wired up at all in that mode.
 
 ## Job observability (§31)
 

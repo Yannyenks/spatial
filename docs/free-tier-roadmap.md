@@ -76,16 +76,46 @@ simpler alternative and rejected — it's now credit-limited
 it's not a stable "totally free" foundation. Local ONNX has no such
 risk. [klymentiev.com/blog/huggingface-inference-api]
 
-### A3. Real voice (STT/TTS) for the concierge
-**Replaces:** nothing existing — this is new capability, currently
-"BUY, not started" in the blueprint.
-**How:** NVIDIA hosts real Riva ASR/TTS models free at
-build.nvidia.com/explore/speech (~40 languages).
-**Effort:** medium. New `VoiceProvider` interface (mirrors the existing
-`AIProvider`/`ReconstructionEngine` pattern), wired into the concierge
-UI as an optional mic input / spoken response.
+### A3. Real voice (STT/TTS) for the concierge — DONE
+**Replaces:** nothing existing — new capability, previously "BUY, not
+started" in the blueprint.
+**Shipped as:** `VoiceProvider` (`src/providers/voice/`), `nvidia/parakeet-tdt-0.6b`
+for ASR and `nvidia/magpie-tts-multilingual` for TTS, wired into the
+public experience viewer's concierge drawer as a mic button (push-to-
+talk, fills the question box with the real transcript rather than
+auto-submitting, so a bad transcription is easy to catch) and a speaker
+icon per assistant answer.
+
+Two real, non-obvious integration details found only by testing live,
+not from the docs:
+- These Riva NIMs aren't behind the shared `integrate.api.nvidia.com`
+  endpoint the chat/vision models use — each is deployed at its own
+  per-model NVCF invocation URL (`NVIDIA_ASR_URL`/`NVIDIA_TTS_URL`),
+  only visible on that exact model's build.nvidia.com page.
+- The two endpoints' language codes are **not symmetric**: this ASR
+  deployment 404s on `en-US` and plain `en`, only `en-GB` works; TTS
+  uses `en-US`. Found by testing both directly, not assumed from the
+  (identical-looking) request shape.
+
+Verified with a genuine round trip, not two isolated calls: synthesized
+"Welcome to the hotel lobby. The pool is two rooms away." through TTS,
+fed the resulting WAV back into ASR, got the identical text back. Also
+verified through the actual UI end-to-end (real mic recording via a
+fake test audio device, real speaker playback, real concierge answer)
+— which surfaced and fixed two real, pre-existing bugs unrelated to the
+voice feature itself:
+1. `Permissions-Policy: microphone=()` (site-wide, set before this
+   feature existed) blocked microphone access outright — changed to
+   `microphone=(self)`.
+2. The CSRF middleware blocked these (and the pre-existing `/ai` and
+   `/events`) public endpoints whenever the visitor's browser happened
+   to also carry a session cookie (e.g. an owner previewing their own
+   published listing while logged in) — none of `/api/experience/**`
+   ever checks the session cookie for authorization, so the whole
+   prefix is now exempt from CSRF.
 **Verified:** build.nvidia.com/explore/speech lists Riva ASR/TTS/NMT
-NIMs as free-tier accessible. [nvidia.com/en-us/ai-data-science/products/riva]
+NIMs as free-tier accessible; both endpoints exercised directly against
+a real account. [nvidia.com/en-us/ai-data-science/products/riva]
 
 ## Phase B — real, free, but semi-manual (no clean hosted API exists)
 

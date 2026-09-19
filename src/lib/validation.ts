@@ -114,6 +114,10 @@ export const conciergeQuestionSchema = z.object({
   question: z.string().min(1).max(500),
 });
 
+export const speakTextSchema = z.object({
+  text: z.string().min(1).max(1000),
+});
+
 export const videoGenerationSchema = z.object({
   spaceIds: z.array(z.string()).min(1),
   durationSeconds: z.number().min(5).max(60),

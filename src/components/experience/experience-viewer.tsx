@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Lock, Maximize, MapPin, Send, Share2, Sparkles, X, MessageCircle, Linkedin, Mail, Link2 } from "lucide-react";
+import { ArrowRight, Lock, Maximize, MapPin, Send, Share2, Sparkles, X, MessageCircle, Linkedin, Mail, Link2, Mic, Square, Volume2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -66,6 +66,11 @@ export function ExperienceViewer({ slug }: { slug: string }) {
   const [linkCopied, setLinkCopied] = useState(false);
   const [aiQuestion, setAiQuestion] = useState("");
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   async function load(withPassword?: string) {
@@ -165,6 +170,73 @@ export function ExperienceViewer({ slug }: { slug: string }) {
       }
     }
     setAiMessages((prev) => [...prev, { role: "assistant", text: texts.join(" ") || "…" }]);
+  }
+
+  /**
+   * Push-to-talk mic input (free-tier roadmap step A3): records with the
+   * browser's own MediaRecorder, sends the real audio to a real speech-to-
+   * text model, and fills the question box with the real transcript — the
+   * visitor still hits Send themselves rather than this auto-submitting,
+   * so a bad transcription is easy to see and correct before it's asked.
+   */
+  async function toggleRecording() {
+    setVoiceError(null);
+    if (recording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        setTranscribing(true);
+        try {
+          const blob = new Blob(chunks, { type: recorder.mimeType });
+          const form = new FormData();
+          form.append("audio", blob, "recording.webm");
+          const res = await fetch(`/api/experience/${slug}/voice/transcribe`, { method: "POST", body: form });
+          const body = await res.json();
+          if (body.text) setAiQuestion(body.text);
+          else setVoiceError("Couldn't make that out — try again or type your question.");
+        } catch {
+          setVoiceError("Couldn't make that out — try again or type your question.");
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setVoiceError("Microphone access is unavailable — check your browser permissions.");
+    }
+  }
+
+  /** Real text-to-speech playback of one concierge answer (free-tier roadmap step A3). */
+  async function speakAnswer(text: string, index: number) {
+    setSpeakingIndex(index);
+    try {
+      const res = await fetch(`/api/experience/${slug}/voice/speak`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) {
+        setSpeakingIndex(null);
+        return;
+      }
+      const blob = await res.blob();
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.onended = () => setSpeakingIndex(null);
+      audio.onerror = () => setSpeakingIndex(null);
+      await audio.play();
+    } catch {
+      setSpeakingIndex(null);
+    }
   }
 
   if (notFound) {
@@ -365,7 +437,7 @@ export function ExperienceViewer({ slug }: { slug: string }) {
               <p className="text-sm text-[var(--fg-muted)]">What would you like to explore?</p>
             )}
             {aiMessages.map((m, i) => (
-              <div key={i} className={m.role === "user" ? "text-right" : ""}>
+              <div key={i} className={m.role === "user" ? "text-right" : "flex items-end gap-1.5"}>
                 <span
                   className={`inline-block max-w-[85%] rounded-[var(--radius-md)] px-3 py-2 text-sm ${
                     m.role === "user" ? "bg-[var(--fg)] text-[var(--bg)]" : "bg-[var(--bg-muted)]"
@@ -373,15 +445,41 @@ export function ExperienceViewer({ slug }: { slug: string }) {
                 >
                   {m.text}
                 </span>
+                {m.role === "assistant" && (
+                  <button
+                    onClick={() => speakAnswer(m.text, i)}
+                    disabled={speakingIndex !== null}
+                    className="focus-ring text-[var(--fg-muted)] disabled:opacity-40"
+                    aria-label="Play this answer aloud"
+                  >
+                    {speakingIndex === i ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Volume2 className="h-3.5 w-3.5" />}
+                  </button>
+                )}
               </div>
             ))}
           </div>
+          {voiceError && <p className="px-4 text-xs text-[var(--color-danger)]">{voiceError}</p>}
           <form onSubmit={askAi} className="flex gap-2 border-t border-[var(--line)] p-4">
             <Input
               placeholder="Show me rooms with a balcony…"
               value={aiQuestion}
               onChange={(e) => setAiQuestion(e.target.value)}
             />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={toggleRecording}
+              disabled={transcribing}
+              aria-label={recording ? "Stop recording" : "Ask by voice"}
+            >
+              {transcribing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : recording ? (
+                <Square className="h-4 w-4 text-[var(--color-danger)]" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </Button>
             <Button type="submit" disabled={!aiQuestion.trim()}>
               <Send className="h-4 w-4" />
             </Button>
