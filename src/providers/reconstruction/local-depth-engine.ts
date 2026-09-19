@@ -1,4 +1,4 @@
-import * as ort from "onnxruntime-node";
+import type * as OrtTypes from "onnxruntime-node";
 import sharp from "sharp";
 import path from "path";
 import type {
@@ -69,9 +69,29 @@ interface DepthSample {
   depthStdDev: number;
 }
 
-let sessionPromise: Promise<ort.InferenceSession> | null = null;
-function getSession(): Promise<ort.InferenceSession> {
-  if (!sessionPromise) sessionPromise = ort.InferenceSession.create(MODEL_PATH);
+// Dynamically imported, never at module top level: this module is
+// imported unconditionally by the reconstruction provider registry
+// regardless of which RECONSTRUCTION_PROVIDER is actually configured at
+// runtime, and onnxruntime-node loads its native addon at import time.
+// A static top-level import crashed every reconstruction request on
+// Vercel with a bare 500 — including ones using the mock engine — the
+// moment its binaries were excluded from serverless tracing (see
+// next.config.ts) to fit under the function-size limit; the binary is
+// simply absent there, so the import itself throws. A dynamic import
+// only runs this when a LocalDepthEngine method is actually called,
+// which happens only when this engine is actually selected.
+let ortPromise: Promise<typeof OrtTypes> | null = null;
+function getOrt(): Promise<typeof OrtTypes> {
+  if (!ortPromise) ortPromise = import("onnxruntime-node");
+  return ortPromise;
+}
+
+let sessionPromise: Promise<OrtTypes.InferenceSession> | null = null;
+async function getSession(): Promise<OrtTypes.InferenceSession> {
+  if (!sessionPromise) {
+    const ort = await getOrt();
+    sessionPromise = ort.InferenceSession.create(MODEL_PATH);
+  }
   return sessionPromise;
 }
 
@@ -101,8 +121,7 @@ async function preprocess(buffer: Buffer): Promise<Float32Array> {
 }
 
 async function computeDepthStdDev(buffer: Buffer): Promise<number> {
-  const session = await getSession();
-  const chw = await preprocess(buffer);
+  const [ort, session, chw] = await Promise.all([getOrt(), getSession(), preprocess(buffer)]);
   const tensor = new ort.Tensor("float32", chw, [1, 3, INPUT_SIZE, INPUT_SIZE]);
   const results = await session.run({ pixel_values: tensor });
   const depth = results.predicted_depth!.data as Float32Array;
