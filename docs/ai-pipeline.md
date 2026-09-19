@@ -50,16 +50,59 @@ an env var and a small registry (`getXProvider()` in each folder's
 `index.ts`) so nothing in a route, service or component imports a
 specific implementation directly:
 
-| Interface              | Env var                 | Mock implementation             |
-| ----------------------- | ------------------------ | -------------------------------- |
-| `StorageProvider`        | `STORAGE_PROVIDER`         | `LocalStorageProvider` (disk)      |
-| `ReconstructionEngine`   | `RECONSTRUCTION_PROVIDER`  | `MockReconstructionEngine`         |
-| `AIProvider`             | `AI_PROVIDER`               | `MockAIProvider`                    |
-| `VideoGenerationProvider` | `VIDEO_PROVIDER`            | `MockVideoGenerationProvider`       |
+| Interface              | Env var                 | Mock implementation             | Real implementation |
+| ----------------------- | ------------------------ | -------------------------------- | -------------------- |
+| `StorageProvider`        | `STORAGE_PROVIDER`         | `LocalStorageProvider` (disk)      | `S3StorageProvider` (`s3`, R2-compatible) |
+| `ReconstructionEngine`   | `RECONSTRUCTION_PROVIDER`  | `MockReconstructionEngine`         | `ReplicateDepthEngine` (`replicate`) |
+| `AIProvider`             | `AI_PROVIDER`               | `MockAIProvider`                    | `NvidiaAIProvider` (`nvidia`) |
+| `VideoGenerationProvider` | `VIDEO_PROVIDER`            | `MockVideoGenerationProvider`       | — not built yet |
 
 To add a real implementation: implement the interface in a new file next
 to the mock, register it in that folder's `index.ts` under a new env
 value, and set the env var. No other file changes.
+
+### `AIProvider`: mock vs. `nvidia`
+
+`AI_PROVIDER=nvidia` (`src/providers/ai/nvidia-ai-provider.ts`) calls
+NVIDIA's hosted NIM catalog (build.nvidia.com, OpenAI-compatible API,
+free tier available — needs `NVIDIA_API_KEY`) for three things:
+
+- **Concierge intent classification.** The model only decides *which*
+  typed tool call (`navigate` / `search_by_relation` /
+  `calculate_distance` / `unknown`) a question maps to, extracting the
+  same shape `MockAIProvider`'s regex parser would. That shape is then
+  run through `executeIntent()` (`src/providers/ai/concierge-intent.ts`,
+  shared by both providers) against the real spatial graph — the model
+  never sees or returns a distance, a matched room, or an answer text
+  directly, so it cannot invent one (§16, §65). A malformed or invalid
+  response, a non-2xx API response, or a network error all fall back to
+  the exact same deterministic regex parser the mock provider uses,
+  logged as a warning — the concierge degrades, it never breaks.
+- **Space description copy.** One constrained prompt with only the
+  real facts already known (name, kind, object count) asking for one
+  marketing sentence — nothing for the model to hallucinate a new
+  amenity from. Falls back to the mock's template string on failure.
+- **Real per-photo scene review**, via a genuine vision-language model
+  (`microsoft/phi-3.5-vision-instruct` by default — a separate model
+  from the text one, since a text-only model cannot accept image
+  content at all). `pipeline.ts` generates real, publicly resolvable
+  URLs (signed R2 URLs in production) for up to `MAX_SCENE_SAMPLE_PHOTOS`
+  (3) photos and passes them as `sampleImageUrls`; the provider looks at
+  up to `MAX_SCENE_VISION_SAMPLES` (2) of them and asks the model to
+  report only concrete, visible issues (poor lighting, a cut-off view,
+  clutter, motion blur) as a short JSON array, deduplicated across
+  photos. Findings merge into the same `qualityScore.recommendations`
+  list already rendered on the space detail page — no separate UI, and
+  no real signal computed but never actually shown. A `localhost` URL
+  from local-disk dev storage isn't reachable by NVIDIA's API and fails
+  closed the same way any other request failure does (empty findings,
+  not a crash); this only produces real findings against a deployed
+  environment with real object-storage URLs.
+
+`MockAIProvider.analyzeScene` — and `NvidiaAIProvider` when no
+`sampleImageUrls` are supplied or every vision call fails — keeps the
+plain, honest low-frame-count check rather than fabricating a vision
+analysis that never happened (§33).
 
 ## Job observability (§31)
 

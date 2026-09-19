@@ -1,11 +1,17 @@
 import { db } from "@/lib/db";
 import { getReconstructionEngine } from "@/providers/reconstruction";
 import { getAIProvider } from "@/providers/ai";
+import { getStorageProvider } from "@/providers/storage";
 import { computeQualityScore } from "@/services/quality-score.service";
 import { recordUsage } from "@/services/usage.service";
 import { updateJobStage, completeJob, failJob } from "@/jobs/queue";
 import type { Asset, JobError } from "@/types";
 import type { AIJob as AIJobRecord } from "@prisma/client";
+
+// Kept small and separate from NvidiaAIProvider's own cap (which sees only
+// as many URLs as this generates) — free-tier rate limits and per-photo
+// vision latency make "analyze everything" the wrong default.
+const MAX_SCENE_SAMPLE_PHOTOS = 3;
 
 /**
  * Resolves (creating if needed) the ModelVersion row for a provider/model
@@ -84,9 +90,19 @@ export async function runPipelineJob(job: AIJobRecord): Promise<void> {
     // --- SCENE_UNDERSTANDING --------------------------------------------
     await updateJobStage(job.id, "SCENE_UNDERSTANDING");
     const aiProvider = getAIProvider();
+    // Real, publicly resolvable URLs for a small photo sample — only a
+    // vision-capable provider (NvidiaAIProvider) uses this; a text-only
+    // implementation ignores it. Generating a signed URL is cheap (local
+    // crypto, no network call), so this costs nothing when unused.
+    const storage = getStorageProvider();
+    const photoAssetsForVision = assetRows.filter((a) => a.kind === "PHOTO").slice(0, MAX_SCENE_SAMPLE_PHOTOS);
+    const sampleImageUrls = await Promise.all(
+      photoAssetsForVision.map((a) => storage.getUrl(a.bucket as never, a.storageKey))
+    );
     const sceneAnalysis = await aiProvider.analyzeScene({
       spaceId: job.spaceId,
       frameUrls: assets.map((a) => a.storageKey),
+      sampleImageUrls,
     });
 
     // --- SPATIAL_RECONSTRUCTION ------------------------------------------
@@ -191,6 +207,12 @@ export async function runPipelineJob(job: AIJobRecord): Promise<void> {
       visualQualityFlaggedCount,
       visualQualitySampledCount,
     });
+    // Real scene-understanding findings (a vision-capable AIProvider's
+    // per-photo observations, or the plain frame-count check otherwise)
+    // surface through the same recommendations list the space detail page
+    // already renders — no separate UI needed, and no risk of a real
+    // signal being computed but never actually shown to anyone.
+    qualityScore.recommendations = [...qualityScore.recommendations, ...sceneAnalysis.warnings];
     await db.reconstruction.update({
       where: { id: reconstruction.id },
       data: { qualityJson: JSON.stringify(qualityScore) },

@@ -16,8 +16,16 @@ export interface SpaceEdge {
 export interface AIProvider {
   readonly id: string;
 
-  /** Scene understanding pass used during reconstruction (§10). */
-  analyzeScene(input: { spaceId: string; frameUrls: string[] }): Promise<{
+  /**
+   * Scene understanding pass used during reconstruction (§10).
+   * `frameUrls` carries every captured asset (used for the frame-count
+   * check) while `sampleImageUrls`, when present, holds a small number of
+   * real, publicly resolvable photo URLs a vision-capable implementation
+   * can actually look at (see `NvidiaAIProvider`) — a text-only
+   * implementation ignores it rather than fabricate an analysis it never
+   * performed (§33).
+   */
+  analyzeScene(input: { spaceId: string; frameUrls: string[]; sampleImageUrls?: string[] }): Promise<{
     warnings: string[];
   }>;
 
