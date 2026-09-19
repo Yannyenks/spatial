@@ -217,6 +217,14 @@ model Asset {
   width           Int?
   height          Int?
   durationSeconds Float?
+  // Real capture-quality signal (src/services/capture-quality.service.ts),
+  // set for PHOTO assets only. Null means "not analyzed" (video, or the
+  // classical-CV pass itself failed) — distinct from false, which means
+  // analyzed and clean. Feeds the visualQuality sub-score in
+  // quality-score.service.ts the same way depth stats feed geometry.
+  isBlurry        Boolean?
+  isUnderexposed  Boolean?
+  isOverexposed   Boolean?
   createdAt       DateTime @default(now())
 
   @@index([projectId])

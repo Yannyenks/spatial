@@ -86,4 +86,45 @@ describe("computeQualityScore", () => {
     });
     expect(withZeroSamples.geometry).toBe(withoutDepth.geometry);
   });
+
+  it("derives visual quality from real capture-quality flags when samples exist", () => {
+    const allClean = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+      visualQualityFlaggedCount: 0,
+      visualQualitySampledCount: 20,
+    });
+    const halfFlagged = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+      visualQualityFlaggedCount: 10,
+      visualQualitySampledCount: 20,
+    });
+    expect(allClean.visualQuality).toBe(100);
+    expect(halfFlagged.visualQuality).toBe(50);
+    expect(halfFlagged.recommendations.some((r) => r.toLowerCase().includes("blurry"))).toBe(true);
+    expect(allClean.recommendations.some((r) => r.toLowerCase().includes("blurry"))).toBe(false);
+  });
+
+  it("falls back to the coverage-based visual quality estimate when no capture-quality samples exist", () => {
+    const withoutSamples = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+    });
+    const withZeroSamples = computeQualityScore({
+      assetCount: 24,
+      hasReconstructionOutput: true,
+      hotspotCount: 1,
+      connectionCount: 1,
+      visualQualityFlaggedCount: 3,
+      visualQualitySampledCount: 0, // every asset was a video, or analysis failed — no real signal
+    });
+    expect(withZeroSamples.visualQuality).toBe(withoutSamples.visualQuality);
+  });
 });

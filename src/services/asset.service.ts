@@ -77,9 +77,15 @@ export async function uploadAsset(
   // time on it. Advisory only: never blocks the upload, mirroring the
   // redaction failure handling above.
   let qualityWarning: string | null = null;
+  let isBlurry: boolean | null = null;
+  let isUnderexposed: boolean | null = null;
+  let isOverexposed: boolean | null = null;
   if (kind === "PHOTO") {
     const quality = await analyzeCaptureQuality(uploadBuffer);
     qualityWarning = quality?.warning ?? null;
+    isBlurry = quality?.isBlurry ?? null;
+    isUnderexposed = quality?.isUnderexposed ?? null;
+    isOverexposed = quality?.isOverexposed ?? null;
   }
 
   const storage = getStorageProvider();
@@ -132,6 +138,9 @@ export async function uploadAsset(
       sizeBytes: ref.sizeBytes,
       width,
       height,
+      isBlurry,
+      isUnderexposed,
+      isOverexposed,
     },
   });
 

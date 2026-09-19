@@ -24,6 +24,12 @@ const DEPTH_STDDEV_CEILING = 70; // a well-captured room with real depth range
  * of the coverage-only heuristic below. Absent (mock engine, or every
  * depth call in a job failed), it falls back to the original
  * asset-count-based estimate — an honest degradation, not a silent gap.
+ *
+ * `visualQualityFlaggedCount`/`visualQualitySampledCount` are the same
+ * idea applied to per-photo blur/exposure analysis
+ * (capture-quality.service.ts, recorded on Asset at upload time): when
+ * present, visualQuality reflects the real fraction of clean photos
+ * instead of a pure coverage-based guess.
  */
 export function computeQualityScore(input: {
   assetCount: number;
@@ -32,6 +38,8 @@ export function computeQualityScore(input: {
   connectionCount: number;
   depthAverageStdDev?: number | null;
   depthSampledCount?: number;
+  visualQualityFlaggedCount?: number;
+  visualQualitySampledCount?: number;
 }): QualityScore {
   const coverage = Math.min(100, Math.round((input.assetCount / RECOMMENDED_ASSET_COUNT) * 100));
 
@@ -54,7 +62,16 @@ export function computeQualityScore(input: {
       ? Math.min(100, 60 + coverage * 0.4)
       : 0;
 
-  const visualQuality = input.hasReconstructionOutput ? Math.min(100, 50 + coverage * 0.5) : 0;
+  const hasRealVisualQualitySignal = input.hasReconstructionOutput && (input.visualQualitySampledCount ?? 0) > 0;
+  const cleanFraction = hasRealVisualQualitySignal
+    ? 1 - (input.visualQualityFlaggedCount ?? 0) / input.visualQualitySampledCount!
+    : null;
+
+  const visualQuality = hasRealVisualQualitySignal
+    ? Math.round(cleanFraction! * 100)
+    : input.hasReconstructionOutput
+      ? Math.min(100, 50 + coverage * 0.5)
+      : 0;
   const navigation = Math.min(100, input.hotspotCount * 15 + input.connectionCount * 20);
 
   const overall = Math.round((coverage + geometry + visualQuality + navigation) / 4);
@@ -71,6 +88,11 @@ export function computeQualityScore(input: {
   }
   if (hasRealDepthSignal && input.depthAverageStdDev! < DEPTH_STDDEV_FLOOR) {
     recommendations.push("Captured photos show little depth variation — try including more of the room, not just close-ups.");
+  }
+  if (hasRealVisualQualitySignal && (input.visualQualityFlaggedCount ?? 0) > 0) {
+    recommendations.push(
+      `${input.visualQualityFlaggedCount} of ${input.visualQualitySampledCount} photo(s) look blurry, too dark, or overexposed — consider retaking them for a cleaner reconstruction.`
+    );
   }
 
   return {

@@ -171,6 +171,8 @@ export async function runPipelineJob(job: AIJobRecord): Promise<void> {
       depthAverageStdDev?: number | null;
       depthSampledCount?: number;
     } | null;
+    const analyzedPhotos = assetRows.filter((a) => a.kind === "PHOTO" && a.isBlurry !== null);
+    const flaggedPhotos = analyzedPhotos.filter((a) => a.isBlurry || a.isUnderexposed || a.isOverexposed);
     const qualityScore = computeQualityScore({
       assetCount: assets.length,
       hasReconstructionOutput: true,
@@ -178,6 +180,8 @@ export async function runPipelineJob(job: AIJobRecord): Promise<void> {
       connectionCount,
       depthAverageStdDev: depthMetadata?.depthAverageStdDev,
       depthSampledCount: depthMetadata?.depthSampledCount,
+      visualQualityFlaggedCount: flaggedPhotos.length,
+      visualQualitySampledCount: analyzedPhotos.length,
     });
     await db.reconstruction.update({
       where: { id: reconstruction.id },
