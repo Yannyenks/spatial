@@ -6,6 +6,7 @@ import { assertStorageBudget } from "@/lib/quotas";
 import { getStorageProvider } from "@/providers/storage";
 import { recordUsage } from "@/services/usage.service";
 import { redactFaces } from "@/services/redaction.service";
+import { analyzeCaptureQuality } from "@/services/capture-quality.service";
 import { logger } from "@/lib/logger";
 import type { AssetKind } from "@/types";
 
@@ -68,6 +69,17 @@ export async function uploadAsset(
     } catch (error) {
       logger.warn("asset.redaction_failed", { projectId, error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  // Real blur/exposure analysis (classical CV — variance of Laplacian +
+  // mean brightness, see capture-quality.service.ts) so an uploader finds
+  // out a photo is unusable *now*, not after a reconstruction job wastes
+  // time on it. Advisory only: never blocks the upload, mirroring the
+  // redaction failure handling above.
+  let qualityWarning: string | null = null;
+  if (kind === "PHOTO") {
+    const quality = await analyzeCaptureQuality(uploadBuffer);
+    qualityWarning = quality?.warning ?? null;
   }
 
   const storage = getStorageProvider();
@@ -143,7 +155,7 @@ export async function uploadAsset(
       ? "Faces in videos are not auto-redacted yet (only photos are). Review this video manually before publishing if it may show identifiable people."
       : null;
 
-  return { ...asset, url: ref.url, thumbnailUrl, privacyWarning };
+  return { ...asset, url: ref.url, thumbnailUrl, privacyWarning, qualityWarning };
 }
 
 export async function listAssets(userId: string, projectId: string, spaceId?: string) {

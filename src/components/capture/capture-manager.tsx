@@ -24,6 +24,7 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [privacyWarning, setPrivacyWarning] = useState<string | null>(null);
+  const [qualityWarning, setQualityWarning] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +63,7 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
         if (!res.ok) throw new ApiError(body?.error?.code, body?.error?.message ?? "Upload failed.", res.status);
         setUploadedCount((c) => c + 1);
         if (body?.asset?.privacyWarning) setPrivacyWarning(body.asset.privacyWarning);
+        if (body?.asset?.qualityWarning) setQualityWarning(body.asset.qualityWarning);
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Upload failed.");
@@ -166,6 +168,11 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
           {privacyWarning && (
             <p className="mt-3 rounded-[var(--radius-md)] border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-sm text-[var(--color-warning)]">
               {privacyWarning}
+            </p>
+          )}
+          {qualityWarning && (
+            <p className="mt-3 rounded-[var(--radius-md)] border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-sm text-[var(--color-warning)]">
+              {qualityWarning}
             </p>
           )}
         </CardContent>
