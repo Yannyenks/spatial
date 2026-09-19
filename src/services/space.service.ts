@@ -33,7 +33,7 @@ export async function getSpaceDetail(userId: string, projectId: string, spaceId:
   const [space, assets, scene, reconstruction, hotspots, connectionsFrom, connectionsTo, jobs] = await Promise.all([
     db.space.findUniqueOrThrow({ where: { id: spaceId } }),
     db.asset.findMany({ where: { spaceId }, orderBy: { createdAt: "desc" } }),
-    db.scene.findUnique({ where: { spaceId }, include: { objects: true } }),
+    db.scene.findUnique({ where: { spaceId }, include: { objects: true, cameraPoses: { orderBy: { order: "asc" } } } }),
     db.reconstruction.findFirst({ where: { spaceId, isCurrent: true } }),
     db.hotspot.findMany({ where: { spaceId }, orderBy: { order: "asc" } }),
     db.spaceConnection.findMany({ where: { fromSpaceId: spaceId }, include: { toSpace: true } }),

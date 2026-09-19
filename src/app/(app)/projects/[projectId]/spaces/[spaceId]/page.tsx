@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { HotspotManager } from "@/components/spaces/hotspot-manager";
 import { RelationManager } from "@/components/spaces/relation-manager";
+import { CameraPoseViewer } from "@/components/spaces/camera-pose-viewer";
 import type { QualityScore } from "@/types";
 
 export default async function SpaceDetailPage({
@@ -16,7 +17,7 @@ export default async function SpaceDetailPage({
 }) {
   const user = await getCurrentUser();
   const { projectId, spaceId } = await params;
-  const { space, assets, reconstruction, hotspots, connectionsFrom, connectionsTo, jobs } = await getSpaceDetail(
+  const { space, assets, scene, reconstruction, hotspots, connectionsFrom, connectionsTo, jobs } = await getSpaceDetail(
     user!.id,
     projectId,
     spaceId
@@ -27,6 +28,8 @@ export default async function SpaceDetailPage({
   ]);
 
   const quality: QualityScore | null = reconstruction?.qualityJson ? JSON.parse(reconstruction.qualityJson) : null;
+  const sceneMetadata: { cameraPoseSource?: string } = scene?.metadataJson ? JSON.parse(scene.metadataJson) : {};
+  const cameraPoseSource = sceneMetadata.cameraPoseSource === "colmap" ? "real" : "placeholder";
 
   return (
     <div className="space-y-6">
@@ -91,6 +94,17 @@ export default async function SpaceDetailPage({
           </CardContent>
         </Card>
       </div>
+
+      {scene && scene.cameraPoses.length > 0 && (
+        <Card>
+          <CardContent className="pt-5">
+            <h2 className="text-sm font-semibold">Camera positions</h2>
+            <div className="mt-3">
+              <CameraPoseViewer poses={scene.cameraPoses} source={cameraPoseSource} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {quality && (
         <Card>
