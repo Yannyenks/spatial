@@ -29,6 +29,24 @@ const nextConfig: NextConfig = {
   // until verified end-to-end via a real video upload). Keeping it as a
   // real runtime `require()` instead of bundling it is the fix.
   serverExternalPackages: ["ffmpeg-static"],
+  // onnxruntime-node (local-depth-engine.ts, free-tier plan step A2)
+  // ships prebuilt native binaries for every platform in one shared
+  // `bin/` folder (win32/linux/darwin × x64/arm64 — no per-platform
+  // optionalDependencies split the way `sharp` uses), ~330MB
+  // uncompressed. Next.js's serverless file tracer bundles it into every
+  // function that transitively imports the reconstruction provider
+  // registry regardless of which RECONSTRUCTION_PROVIDER is actually
+  // configured at runtime, blowing past Vercel's 262MB function-size
+  // limit — found by a real failed deployment, not predicted in advance.
+  // Excluding it here keeps `local-depth` fully working locally (all
+  // files are still on disk in dev) while letting Vercel deploy; a
+  // deployment with RECONSTRUCTION_PROVIDER=local-depth would still fail
+  // at runtime there until this moves to onnxruntime-web (WASM, no
+  // native binaries) — tracked as a follow-up, not silently swept under
+  // the rug.
+  outputFileTracingExcludes: {
+    "*": ["node_modules/onnxruntime-node/bin/**"],
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
