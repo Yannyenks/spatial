@@ -11,11 +11,13 @@ FROM ghcr.io/nerfstudio-project/nerfstudio:1.1.5
 
 WORKDIR /workspace
 
-# The base image's runtime stage copies compiled site-packages from its
-# builder stage but doesn't guarantee `pip` itself is left on PATH —
-# ensure it explicitly rather than assume, since this layer only needs to
-# add two pure-Python packages, not rebuild anything CUDA-related.
-RUN python3 -m ensurepip --upgrade && python3 -m pip install --no-cache-dir runpod requests
+# The base image only apt-installs bare `python3.10` (no pip) — confirmed
+# live: `python3 -m ensurepip` fails with "No module named ensurepip",
+# since Ubuntu splits that into the separate python3-venv package rather
+# than bundling it with python3.10 itself. Installing pip via apt instead
+# of ensurepip avoids relying on a module the base image never included.
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir runpod requests
 
 COPY handler.py /workspace/handler.py
 
