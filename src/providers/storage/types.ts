@@ -27,6 +27,16 @@ export interface StorageProvider {
   putObject(input: PutObjectInput): Promise<StorageObjectRef>;
   /** Returns a URL usable to read the object (signed if the bucket is private). */
   getUrl(bucket: StorageBucket, key: string, opts?: { expiresInSeconds?: number }): Promise<string>;
+  /**
+   * Returns a presigned URL an external, untrusted caller can PUT bytes to
+   * directly (RunPod splat-training worker — free-tier plan step B2 GPU
+   * path) without ever holding our storage credentials or routing the file
+   * through a Vercel serverless function's body-size limit. Not
+   * implementable for local-disk dev the same way (no third party can PUT
+   * to a developer's own machine); dev doesn't need it since the worker
+   * only ever runs against the deployed app.
+   */
+  getUploadUrl(bucket: StorageBucket, key: string, opts?: { expiresInSeconds?: number; contentType?: string }): Promise<string>;
   /** Deletes an object. */
   deleteObject(bucket: StorageBucket, key: string): Promise<void>;
   /** Reads raw bytes back (used by server-side processing, e.g. mock reconstruction). */

@@ -79,6 +79,21 @@ export class S3StorageProvider implements StorageProvider {
     });
   }
 
+  async getUploadUrl(
+    bucket: StorageBucket,
+    key: string,
+    opts?: { expiresInSeconds?: number; contentType?: string }
+  ): Promise<string> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: this.objectKey(bucket, key),
+      ContentType: opts?.contentType ?? "application/octet-stream",
+    });
+    return getSignedUrl(this.client, command, {
+      expiresIn: opts?.expiresInSeconds ?? DEFAULT_EXPIRY_SECONDS,
+    });
+  }
+
   async deleteObject(bucket: StorageBucket, key: string): Promise<void> {
     await this.client.send(
       new DeleteObjectCommand({ Bucket: this.bucket, Key: this.objectKey(bucket, key) })

@@ -303,6 +303,31 @@ model CameraPoseJob {
   @@index([spaceId])
 }
 
+/**
+ * Tracks a real Gaussian Splat training run for one space (free-tier plan
+ * step B2, GPU path): a RunPod Serverless worker running nerfstudio
+ * (COLMAP -> splatfacto -> export) against this space's real photos.
+ * Same "dispatch and return, report back later" shape as CameraPoseJob —
+ * training takes minutes on a GPU, far past what a serverless request
+ * should block on. Distinct from the `provider: "manual-upload"` path in
+ * splat.service.ts: this is a job THIS app triggers and pays for, not a
+ * file someone trained elsewhere and dropped in.
+ */
+model SplatTrainingJob {
+  id           String    @id @default(cuid())
+  projectId    String
+  spaceId      String
+  status       String    @default("QUEUED") // QUEUED | RUNNING | COMPLETED | FAILED
+  error        String?
+  runpodJobId  String?
+  outputBucket String?
+  outputKey    String?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@index([spaceId])
+}
+
 model SpatialObjectRecord {
   id         String  @id @default(cuid())
   sceneId    String

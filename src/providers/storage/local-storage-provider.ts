@@ -37,6 +37,13 @@ export class LocalStorageProvider implements StorageProvider {
     return `${APP_URL}/api/uploads/${bucket}/${key}`;
   }
 
+  async getUploadUrl(): Promise<string> {
+    // No external caller can PUT to a developer's own machine, so this
+    // has no meaningful local-dev equivalent — the RunPod splat-training
+    // worker only ever targets the deployed app, never local dev.
+    throw new Error("getUploadUrl is not supported by LocalStorageProvider — RunPod splat training requires the S3-compatible provider.");
+  }
+
   async deleteObject(bucket: StorageBucket, key: string): Promise<void> {
     const filePath = this.resolvePath(bucket, key);
     await fs.rm(filePath, { force: true });
