@@ -62,6 +62,7 @@ export function CinematicVideo({
           src={sources.poster.jpg}
           alt=""
           aria-hidden
+          fetchPriority="low"
           className={cn(
             "absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ease-cinematic",
             shouldLoad && !reduceMotion ? "opacity-0" : "opacity-100"
@@ -79,6 +80,18 @@ export function CinematicVideo({
           muted
           playsInline
           preload="metadata"
+          // @ts-expect-error -- fetchPriority is valid on <video> per the
+          // Priority Hints spec, but @types/react doesn't type it there yet
+          // (only on img/link/script). Purely a scheduling hint (never
+          // changes correctness) so a stale/incomplete type is safe to
+          // silence rather than block on. Without it, this ambient
+          // background video competes for connections at the same default
+          // priority as real functional requests on the same page — on a
+          // slow connection this was reproduced live starving the
+          // register/login form's own submit request indefinitely (it
+          // never got a response) until the video finished. Auth pages are
+          // the one place where that's a genuine outage, not just jank.
+          fetchPriority="low"
         >
           <source src={src} type="video/mp4" />
         </video>
