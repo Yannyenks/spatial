@@ -40,6 +40,13 @@ jobs:
           python3 scripts/colmap/download_photos.py photos.json images
 
       - name: Run COLMAP (feature extraction, matching, sparse mapping)
+        env:
+          # The apt-installed COLMAP binary links Qt even for CLI-only
+          # subcommands and aborts immediately ("no Qt platform plugin
+          # could be initialized", exit 134) on a headless runner with no
+          # display - confirmed live on ubuntu-latest. `offscreen` is Qt's
+          # own headless backend, COLMAP's documented workaround for CI.
+          QT_QPA_PLATFORM: offscreen
         run: |
           colmap feature_extractor --database_path db.db --image_path images --ImageReader.single_camera 1
           colmap exhaustive_matcher --database_path db.db
