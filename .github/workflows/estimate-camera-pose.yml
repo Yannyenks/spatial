@@ -48,8 +48,13 @@ jobs:
           # own headless backend, COLMAP's documented workaround for CI.
           QT_QPA_PLATFORM: offscreen
         run: |
-          colmap feature_extractor --database_path db.db --image_path images --ImageReader.single_camera 1
-          colmap exhaustive_matcher --database_path db.db
+          # feature_extractor/exhaustive_matcher default to GPU (SiftGPU,
+          # OpenGL-based) - fails past the Qt fix too, with an OpenGL
+          # context creation crash, since ubuntu-latest has no GPU/driver.
+          # Confirmed live. --use_gpu 0 forces COLMAP's CPU SIFT path,
+          # which is COLMAP's own documented option for exactly this case.
+          colmap feature_extractor --database_path db.db --image_path images --ImageReader.single_camera 1 --SiftExtraction.use_gpu 0
+          colmap exhaustive_matcher --database_path db.db --SiftMatching.use_gpu 0
           mkdir -p sparse
           colmap mapper --database_path db.db --image_path images --output_path sparse
           if [ -d sparse/0 ]; then
