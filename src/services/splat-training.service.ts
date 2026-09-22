@@ -28,11 +28,19 @@ export class SplatTrainingError extends Error {
 
 /**
  * Starts a real Gaussian Splat training run for a space (free-tier plan
- * step B2, GPU path): dispatches a job to a RunPod Serverless endpoint
- * running nerfstudio (COLMAP -> splatfacto -> export), which reports back
- * to `completeSplatTrainingJob`. Returns immediately — training takes
+ * step B2, GPU path): dispatches a job to a Modal app running nerfstudio
+ * (COLMAP -> splatfacto -> export) on a rented GPU, which reports back to
+ * `completeSplatTrainingJob`. Returns immediately — training takes
  * minutes on a GPU, the same "enqueue and return" discipline as
  * requestCameraPoseEstimation.
+ *
+ * Modal replaces an earlier RunPod Serverless integration: after fixing
+ * two real bugs there (an endpoint pointing at a deleted template, then
+ * an oversubscribed GPU type), no worker ever reached RUNNING across
+ * every GPU type and region tried - an account-level restriction beyond
+ * what endpoint config could fix. Modal reuses the exact same worker
+ * image (ghcr.io/yannyenks/spatial-splat-worker, modal_worker/splat_worker.py
+ * pulls it via modal.Image.from_registry) rather than rebuilding anything.
  */
 export async function requestSplatTraining(
   userId: string,
@@ -52,8 +60,9 @@ export async function requestSplatTraining(
   const job = await db.splatTrainingJob.create({ data: { projectId, spaceId, status: "QUEUED" } });
 
   try {
-    const runpodJobId = await dispatchTrainingJob(job.id, projectId, spaceId, opts?.maxIterations ?? DEFAULT_MAX_ITERATIONS);
-    await db.splatTrainingJob.update({ where: { id: job.id }, data: { runpodJobId } });
+    const providerJobId = await dispatchTrainingJob(job.id, projectId, spaceId, opts?.maxIterations ?? DEFAULT_MAX_ITERATIONS);
+    const updated = await db.splatTrainingJob.update({ where: { id: job.id }, data: { providerJobId } });
+    return updated;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await db.splatTrainingJob.update({
@@ -61,19 +70,16 @@ export async function requestSplatTraining(
       data: { status: "FAILED", error: message, completedAt: new Date() },
     });
     logger.warn("splat_training.dispatch_failed", { jobId: job.id, spaceId, error: message });
-    throw new SplatTrainingError("Could not start splat training. Check RUNPOD_API_KEY/RUNPOD_ENDPOINT_ID configuration.");
+    throw new SplatTrainingError("Could not start splat training. Check MODAL_TRIGGER_URL/SPLAT_TRAINING_SECRET configuration.");
   }
-
-  return job;
 }
 
-async function dispatchTrainingJob(jobId: string, projectId: string, spaceId: string, maxIterations: number): Promise<string> {
-  const apiKey = process.env.RUNPOD_API_KEY;
-  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+async function dispatchTrainingJob(jobId: string, projectId: string, spaceId: string, maxIterations: number): Promise<string | null> {
+  const triggerUrl = process.env.MODAL_TRIGGER_URL;
   const secret = process.env.SPLAT_TRAINING_SECRET;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!apiKey || !endpointId || !secret || !appUrl) {
-    throw new Error("RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID, SPLAT_TRAINING_SECRET or NEXT_PUBLIC_APP_URL is not set.");
+  if (!triggerUrl || !secret || !appUrl) {
+    throw new Error("MODAL_TRIGGER_URL, SPLAT_TRAINING_SECRET or NEXT_PUBLIC_APP_URL is not set.");
   }
 
   const storage = getStorageProvider();
@@ -94,25 +100,24 @@ async function dispatchTrainingJob(jobId: string, projectId: string, spaceId: st
   });
   await db.splatTrainingJob.update({ where: { id: jobId }, data: { outputBucket: "reconstruction", outputKey } });
 
-  const res = await fetch(`https://api.runpod.ai/v2/${endpointId}/run`, {
+  const res = await fetch(triggerUrl, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      input: {
-        job_id: jobId,
-        photo_urls: photoUrls,
-        upload_url: uploadUrl,
-        callback_url: `${appUrl}/api/internal/splat-training-jobs/${jobId}/complete`,
-        callback_secret: secret,
-        max_iterations: maxIterations,
-      },
+      secret,
+      job_id: jobId,
+      photo_urls: photoUrls,
+      upload_url: uploadUrl,
+      callback_url: `${appUrl}/api/internal/splat-training-jobs/${jobId}/complete`,
+      callback_secret: secret,
+      max_iterations: maxIterations,
     }),
   });
   const body = await res.json();
   if (!res.ok) {
-    throw new Error(`RunPod job dispatch failed (${res.status}): ${JSON.stringify(body).slice(0, 300)}`);
+    throw new Error(`Modal job dispatch failed (${res.status}): ${JSON.stringify(body).slice(0, 300)}`);
   }
-  return body.id as string;
+  return (body.callId as string) ?? null;
 }
 
 export async function getSplatTrainingJobStatus(userId: string, projectId: string, jobId: string) {
@@ -127,7 +132,7 @@ export type SplatTrainingJobResult =
   | { status: "FAILED"; error: string };
 
 /**
- * Called only by the RunPod worker (via a shared-secret-authenticated
+ * Called only by the Modal worker (via a shared-secret-authenticated
  * route) once it has already uploaded the trained .ply directly to the
  * presigned URL generated in `dispatchTrainingJob` — this just records the
  * result and creates the new Reconstruction version, the same
@@ -172,7 +177,7 @@ export async function completeSplatTrainingJob(jobId: string, result: SplatTrain
       outputBucket: job.outputBucket,
       outputKey: job.outputKey,
       isCurrent: true,
-      provider: "runpod",
+      provider: "modal",
       model: "nerfstudio-splatfacto",
     },
   });

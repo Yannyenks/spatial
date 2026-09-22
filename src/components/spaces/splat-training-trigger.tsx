@@ -12,7 +12,7 @@ interface SplatTrainingJob {
 
 /**
  * Triggers a real Gaussian Splat training run on a rented GPU (free-tier
- * plan step B2, GPU path — RunPod Serverless running nerfstudio). Genuinely
+ * plan step B2, GPU path — Modal running nerfstudio). Genuinely
  * slow (COLMAP + splatfacto training, several minutes) and genuinely costs
  * real money per run (a few cents to under a dollar on a consumer GPU) —
  * polled, not awaited synchronously, and labeled honestly rather than
@@ -69,7 +69,7 @@ export function SplatTrainingTrigger({ projectId, spaceId }: { projectId: string
     <div className="mt-3 border-t border-[var(--line)] pt-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-[var(--fg-muted)]">
-          Beta: trains a real 3D splat on a rented GPU (RunPod) — takes several minutes and costs real money per run.
+          Beta: trains a real 3D splat on a rented GPU (Modal) — takes several minutes and costs real money per run.
         </p>
         <Button variant="secondary" size="sm" onClick={start} disabled={starting || running}>
           {running ? "Training…" : "Train real 3D splat"}
