@@ -1,4 +1,3 @@
-import dynamic from "next/dynamic";
 import { getCurrentUser } from "@/lib/auth";
 import { getSpaceDetail } from "@/services/space.service";
 import { getRelationsForSpace } from "@/services/spatial-query.service";
@@ -8,20 +7,21 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { HotspotManager } from "@/components/spaces/hotspot-manager";
 import { RelationManager } from "@/components/spaces/relation-manager";
+import { CameraPoseViewer } from "@/components/spaces/camera-pose-viewer";
 import { CameraPoseTrigger } from "@/components/spaces/camera-pose-trigger";
+import { SplatViewer } from "@/components/spaces/splat-viewer";
 import { SplatUploader } from "@/components/spaces/splat-uploader";
 import { SplatTrainingTrigger } from "@/components/spaces/splat-training-trigger";
 import type { QualityScore } from "@/types";
 
-// Loaded on demand, not bundled into every space-detail visit: these pull
-// in Three.js and @mkkellogg/gaussian-splats-3d, which measured ~5s of
-// extra chunk-download time on a fresh space with neither real camera
-// poses nor a trained splat yet — real weight paid for nothing on the
-// common "not processed yet" case. next/dynamic (no `ssr: false`, which
-// Server Components can't use) still code-splits them into their own
-// chunk, fetched only once the page actually renders one.
-const CameraPoseViewer = dynamic(() => import("@/components/spaces/camera-pose-viewer").then((m) => m.CameraPoseViewer));
-const SplatViewer = dynamic(() => import("@/components/spaces/splat-viewer").then((m) => m.SplatViewer));
+// CameraPoseViewer and SplatViewer both defer their actual heavy
+// dependency (Three.js, @mkkellogg/gaussian-splats-3d) to a dynamic
+// import() inside their own useEffect rather than a static top-level
+// import — see the comment in camera-pose-viewer.tsx for why: a plain
+// next/dynamic() wrapper here did NOT stop those chunks from loading on
+// every space-detail visit (verified live, no change in load time), so
+// the fix has to live inside each component's own module, not at this
+// call site.
 
 export default async function SpaceDetailPage({
   params,
