@@ -52,6 +52,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     const assetsWithUrls = await Promise.all(
       data.assets.map(async (a) => ({ ...a, url: await storage.getUrl(a.bucket as StorageBucket, a.storageKey) }))
     );
+    // Same fix as space.service.ts#getSpaceDetail: a stored outputUri is a
+    // presigned URL with a 6h expiry, fine for the mock/depth engines
+    // (never fetched later) but a real bug for a trained splat a visitor
+    // might open days after training - re-derive a fresh URL from the
+    // real bucket/key on every read instead of trusting the stored one.
+    const reconstructionsWithUrls = await Promise.all(
+      data.reconstructions.map(async (r) => ({
+        ...r,
+        outputUri: r.outputBucket && r.outputKey ? await storage.getUrl(r.outputBucket as StorageBucket, r.outputKey) : r.outputUri,
+        quality: r.qualityJson ? JSON.parse(r.qualityJson) : null,
+      }))
+    );
 
     return NextResponse.json({
       experience: {
@@ -67,10 +79,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
       hotspots: data.hotspots,
       connections: data.connections,
       assets: assetsWithUrls,
-      reconstructions: data.reconstructions.map((r) => ({
-        ...r,
-        quality: r.qualityJson ? JSON.parse(r.qualityJson) : null,
-      })),
+      reconstructions: reconstructionsWithUrls,
     });
   } catch (error) {
     return await toApiError(error);

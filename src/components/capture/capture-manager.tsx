@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { UploadCloud, Video, Play } from "lucide-react";
+import { UploadCloud, Video, Play, Check } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,11 +16,32 @@ interface SpaceRow {
   kind: string;
 }
 
+// Below this, COLMAP/splat training routinely fails to find enough
+// matches to converge at all (confirmed live, not a guess — see
+// camera-pose.service.ts's own MIN_PHOTOS_FOR_SFM). Above it, more
+// coverage keeps helping, but this is roughly where a typical single
+// room stops being obviously under-covered. A target, not an enforced
+// minimum — the backend's own real floor is much lower (3) so a small
+// space isn't blocked outright.
+const RECOMMENDED_PHOTO_COUNT = 20;
+
+const CAPTURE_TIPS = [
+  "Walk slowly in a full circle around the room, keeping the camera at a consistent height (around eye level).",
+  "Take a photo every few steps so consecutive shots overlap by about 70% — the more two photos have in common, the easier it is to match them.",
+  "Capture every wall, corner and piece of furniture, including a couple of shots looking up and down for tall or low features.",
+  "Keep the lighting steady and avoid moving people or objects between shots — a scene that changes between photos confuses reconstruction.",
+  "Avoid motion blur: pause for a beat before each shot rather than capturing while walking.",
+];
+
 export function CaptureManager({ projectId, initialSpaces }: { projectId: string; initialSpaces: SpaceRow[] }) {
   const [spaces, setSpaces] = useState(initialSpaces);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string>(initialSpaces[0]?.id ?? "");
   const [newSpaceName, setNewSpaceName] = useState("");
-  const [uploadedCount, setUploadedCount] = useState(0);
+  // Keyed by spaceId, not a single running total — the recommended-count
+  // guidance is per room, and a session covering several rooms shouldn't
+  // make one well-covered room look under-shot just because another one
+  // was captured first.
+  const [uploadedCounts, setUploadedCounts] = useState<Record<string, number>>({});
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [privacyWarning, setPrivacyWarning] = useState<string | null>(null);
@@ -46,13 +67,14 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0 || !selectedSpaceId) return;
+    const spaceId = selectedSpaceId;
     setUploading(true);
     setError(null);
     try {
       for (const file of Array.from(files)) {
         const form = new FormData();
         form.append("file", file);
-        form.append("spaceId", selectedSpaceId);
+        form.append("spaceId", spaceId);
         const csrfToken = getCsrfToken();
         const res = await fetch(`/api/projects/${projectId}/assets`, {
           method: "POST",
@@ -61,7 +83,7 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
         });
         const body = await res.json();
         if (!res.ok) throw new ApiError(body?.error?.code, body?.error?.message ?? "Upload failed.", res.status);
-        setUploadedCount((c) => c + 1);
+        setUploadedCounts((prev) => ({ ...prev, [spaceId]: (prev[spaceId] ?? 0) + 1 }));
         if (body?.asset?.privacyWarning) setPrivacyWarning(body.asset.privacyWarning);
         if (body?.asset?.qualityWarning) setQualityWarning(body.asset.qualityWarning);
       }
@@ -87,6 +109,8 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
       setProcessing(false);
     }
   }
+
+  const selectedSpaceUploadedCount = uploadedCounts[selectedSpaceId] ?? 0;
 
   return (
     <div className="space-y-6">
@@ -126,9 +150,17 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
         <CardContent className="pt-5">
           <h2 className="text-sm font-semibold">2. Capture or import</h2>
           <p className="mt-1 text-sm text-[var(--fg-muted)]">
-            Move slowly around the room. Keep your camera approximately at eye level, and capture
-            every wall, corner and piece of furniture for the best reconstruction.
+            For a real, walkable 3D result (not just a photo slideshow), coverage matters more than
+            any single great shot:
           </p>
+          <ul className="mt-3 space-y-1.5">
+            {CAPTURE_TIPS.map((tip) => (
+              <li key={tip} className="flex items-start gap-2 text-sm text-[var(--fg-muted)]">
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--color-accent)]" />
+                {tip}
+              </li>
+            ))}
+          </ul>
 
           <div
             onDragOver={(e) => e.preventDefault()}
@@ -159,8 +191,19 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
                 onChange={(e) => handleFiles(e.target.files)}
               />
             </div>
-            {uploadedCount > 0 && (
-              <p className="mt-4 text-xs text-[var(--fg-muted)]">{uploadedCount} file(s) uploaded this session</p>
+            {selectedSpaceUploadedCount > 0 && (
+              <div className="mt-4 w-full max-w-xs">
+                <p className="text-xs text-[var(--fg-muted)]">
+                  {selectedSpaceUploadedCount} of ~{RECOMMENDED_PHOTO_COUNT} recommended photos for this space
+                  {selectedSpaceUploadedCount >= RECOMMENDED_PHOTO_COUNT && " — good coverage"}
+                </p>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--bg-muted)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--color-accent)] transition-all"
+                    style={{ width: `${Math.min(100, (selectedSpaceUploadedCount / RECOMMENDED_PHOTO_COUNT) * 100)}%` }}
+                  />
+                </div>
+              </div>
             )}
           </div>
 

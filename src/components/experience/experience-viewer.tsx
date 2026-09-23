@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Lock, Maximize, MapPin, Send, Share2, Sparkles, X, MessageCircle, Linkedin, Mail, Link2, Mic, Square, Volume2, Loader2 } from "lucide-react";
+import { ArrowRight, Lock, Maximize, MapPin, Send, Share2, Sparkles, X, MessageCircle, Linkedin, Mail, Link2, Mic, Square, Volume2, Loader2, Box } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SplatViewer } from "@/components/spaces/splat-viewer";
 
 interface Space {
   id: string;
@@ -31,6 +32,12 @@ interface Asset {
   kind: string;
   url: string;
 }
+interface Reconstruction {
+  id: string;
+  spaceId: string;
+  method: string;
+  outputUri: string | null;
+}
 interface ExperienceData {
   experience: { id: string; name: string; slug: string; requiresPassword: boolean };
   project: { id: string; name: string; type: string };
@@ -38,6 +45,7 @@ interface ExperienceData {
   hotspots: Hotspot[];
   connections: Connection[];
   assets: Asset[];
+  reconstructions: Reconstruction[];
 }
 
 function useSessionId() {
@@ -61,6 +69,7 @@ export function ExperienceViewer({ slug }: { slug: string }) {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [currentSpaceId, setCurrentSpaceId] = useState<string | null>(null);
+  const [show3D, setShow3D] = useState(true);
   const [aiOpen, setAiOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -117,6 +126,14 @@ export function ExperienceViewer({ slug }: { slug: string }) {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSpaceId]);
+
+  // Default to the real 3D splat when this space has one — that's the
+  // whole point of training it — but let each newly-entered space start
+  // fresh rather than carrying over a "show photos instead" choice made
+  // in a previous space that may not even have a splat.
+  useEffect(() => {
+    setShow3D(true);
   }, [currentSpaceId]);
 
   const shareTitle = data ? `${data.experience.name} — ${data.project.name}` : "Spatial experience";
@@ -283,6 +300,10 @@ export function ExperienceViewer({ slug }: { slug: string }) {
   const currentAssets = data.assets.filter((a) => a.spaceId === currentSpace?.id && a.kind === "PHOTO");
   const heroAsset = currentAssets[0];
   const currentHotspots = data.hotspots.filter((h) => h.spaceId === currentSpace?.id);
+  const splatReconstruction = data.reconstructions.find(
+    (r) => r.spaceId === currentSpace?.id && r.method === "GAUSSIAN_SPLATTING" && r.outputUri
+  );
+  const showingSplat = Boolean(splatReconstruction) && show3D;
   const reachable = data.connections
     .filter((c) => c.fromSpaceId === currentSpace?.id)
     .map((c) => data.spaces.find((s) => s.id === c.toSpaceId))
@@ -292,7 +313,9 @@ export function ExperienceViewer({ slug }: { slug: string }) {
     <div ref={containerRef} className="relative min-h-screen bg-black text-white">
       {/* Hero */}
       <div className="relative h-screen w-full overflow-hidden">
-        {heroAsset ? (
+        {showingSplat && splatReconstruction?.outputUri ? (
+          <SplatViewer key={splatReconstruction.id} url={splatReconstruction.outputUri} controls="walk" height="100%" />
+        ) : heroAsset ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={heroAsset.url} alt={currentSpace?.name ?? ""} className="h-full w-full object-cover" />
         ) : (
@@ -300,7 +323,7 @@ export function ExperienceViewer({ slug }: { slug: string }) {
             No media captured for this space yet.
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/40" />
+        {!showingSplat && <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/40" />}
 
         {/* Top bar */}
         <div className="absolute inset-x-0 top-0 flex items-center justify-between p-5">
@@ -309,6 +332,16 @@ export function ExperienceViewer({ slug }: { slug: string }) {
             <h1 className="text-lg font-semibold">{currentSpace?.name}</h1>
           </div>
           <div className="relative flex gap-2">
+            {splatReconstruction && (
+              <button
+                onClick={() => setShow3D((v) => !v)}
+                className="focus-ring flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2.5 text-sm font-medium backdrop-blur hover:bg-white/20"
+                aria-pressed={showingSplat}
+              >
+                <Box className="h-4 w-4" />
+                {showingSplat ? "Photos" : "Walk in 3D"}
+              </button>
+            )}
             <button
               onClick={share}
               className="focus-ring rounded-full bg-white/10 p-2.5 backdrop-blur hover:bg-white/20"
