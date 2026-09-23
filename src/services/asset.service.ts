@@ -165,6 +165,13 @@ export async function uploadAsset(
     await db.project.update({ where: { id: projectId }, data: { status: "CAPTURING" } });
   }
 
+  // First photo for a space becomes its cover (drives the "Empty"/"Captured"
+  // badge on the project overview page) — the `coverAssetId: null` guard
+  // means only the first upload wins, not every subsequent one.
+  if (spaceId && kind === "PHOTO") {
+    await db.space.updateMany({ where: { id: spaceId, coverAssetId: null }, data: { coverAssetId: asset.id } });
+  }
+
   const thumbnailUrl = thumbnailKey ? await storage.getUrl("thumbnails", thumbnailKey) : null;
 
   // Face redaction above only covers photos (kind === "PHOTO"). Per-frame
