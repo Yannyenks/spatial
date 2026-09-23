@@ -140,8 +140,31 @@ export function SplatViewer({
 
       viewer = new GaussianSplats3D.Viewer(viewerOpts);
 
+      // The library detects format by checking path.endsWith('.ply') etc
+      // (confirmed by reading its real source, not assumed) - a presigned
+      // R2/S3 URL's path is followed by a `?X-Amz-...` query string, so
+      // that check never matches and it silently fails to load with
+      // "File format not supported", reproduced live. Extracting just the
+      // pathname (no query string) before checking the extension, and
+      // passing the result explicitly, sidesteps the library's own
+      // broken auto-detection entirely rather than depending on it.
+      const pathname = (() => {
+        try {
+          return new URL(url).pathname;
+        } catch {
+          return url;
+        }
+      })();
+      const format = pathname.endsWith(".ply")
+        ? GaussianSplats3D.SceneFormat.Ply
+        : pathname.endsWith(".ksplat")
+          ? GaussianSplats3D.SceneFormat.KSplat
+          : pathname.endsWith(".splat")
+            ? GaussianSplats3D.SceneFormat.Splat
+            : undefined;
+
       try {
-        await viewer.addSplatScene(url, { showLoadingUI: true, splatAlphaRemovalThreshold: 5 });
+        await viewer.addSplatScene(url, { format, showLoadingUI: true, splatAlphaRemovalThreshold: 5 });
         if (cancelled) {
           await viewer.dispose();
           return;
