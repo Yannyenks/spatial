@@ -184,11 +184,13 @@ export function SplatViewer({
   }, [url, walkMode, height]);
 
   return (
-    <div>
+    // The wrapper carries the height too: with a percentage height (e.g.
+    // "100%" on the experience page), an auto-height wrapper would make the
+    // inner container resolve to zero and the canvas would never show.
+    <div className="relative w-full" style={{ height }}>
       <div
         ref={containerRef}
-        className="relative w-full cursor-pointer overflow-hidden rounded-[var(--radius-md)] bg-black"
-        style={{ height }}
+        className="relative h-full w-full cursor-pointer overflow-hidden rounded-[var(--radius-md)] bg-black"
       >
         {loading && !error && (
           <p className="absolute inset-0 flex items-center justify-center text-sm text-white/70">
@@ -201,7 +203,9 @@ export function SplatViewer({
           </div>
         )}
       </div>
-      {error && <p className="mt-2 text-sm text-[var(--color-danger)]">{error}</p>}
+      {error && (
+        <p className="absolute inset-x-0 bottom-0 bg-black/70 p-2 text-sm text-[var(--color-danger)]">{error}</p>
+      )}
     </div>
   );
 }
