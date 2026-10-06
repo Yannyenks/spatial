@@ -14,7 +14,15 @@ import { useEffect, useRef, useState } from "react";
 // Next still renders it once on the server for the initial HTML) must
 // never evaluate that.
 const DEFAULT_VIEWER_HEIGHT = 480;
-const MOVE_SPEED = 3; // meters/second, roughly a slow walking pace
+const MOVE_SPEED = 3; // units/second, until the scene's real size is measured
+// Both training workers export with Nerfstudio (`ns-export gaussian-splat`),
+// which writes scenes Z-up inside a normalized box of roughly +/-1 unit
+// around an arbitrary center - measured on a real trained splat, not
+// assumed. This viewer is Y-up, so the scene is rotated -90deg about X on
+// load, then the camera is placed from the scene's measured bounds rather
+// than at fixed coordinates that can sit entirely outside it (which is
+// what left the walkthrough a black screen).
+const Z_UP_TO_Y_UP = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
 const KEY_TO_ACTION: Record<string, "forward" | "back" | "left" | "right"> = {
   KeyW: "forward",
   ArrowUp: "forward",
@@ -25,6 +33,37 @@ const KEY_TO_ACTION: Record<string, "forward" | "back" | "left" | "right"> = {
   KeyD: "right",
   ArrowRight: "right",
 };
+
+type SceneBounds = { center: [number, number, number]; size: [number, number, number]; floorY: number };
+
+// 5th-95th percentile bounds over a sample of splat centers, so stray
+// floater splats far from the scene don't skew where the camera starts
+// or how fast it moves.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function measureScene(splatMesh: any, THREE: any): SceneBounds | null {
+  const count: number = splatMesh?.getSplatCount?.() ?? 0;
+  if (!count) return null;
+  const stride = Math.max(1, Math.floor(count / 20000));
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const zs: number[] = [];
+  const center = new THREE.Vector3();
+  for (let i = 0; i < count; i += stride) {
+    splatMesh.getSplatCenter(i, center, true);
+    xs.push(center.x);
+    ys.push(center.y);
+    zs.push(center.z);
+  }
+  for (const values of [xs, ys, zs]) values.sort((a, b) => a - b);
+  const at = (values: number[], q: number) => values[Math.floor((values.length - 1) * q)] ?? 0;
+  const lo = [at(xs, 0.05), at(ys, 0.05), at(zs, 0.05)] as const;
+  const hi = [at(xs, 0.95), at(ys, 0.95), at(zs, 0.95)] as const;
+  return {
+    center: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2],
+    size: [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]],
+    floorY: lo[1],
+  };
+}
 
 /**
  * `controls="walk"` (public visitor experience) gives real first-person
@@ -68,6 +107,9 @@ export function SplatViewer({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let pointerControls: any = null;
     let cleanupInput: (() => void) | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let walkCamera: any = null;
+    let moveSpeed = MOVE_SPEED;
     setLoading(true);
     setError(null);
 
@@ -94,6 +136,7 @@ export function SplatViewer({
         const { PointerLockControls } = await import("three/addons/controls/PointerLockControls.js");
         const camera = new THREE.PerspectiveCamera(65, container.clientWidth / container.clientHeight, 0.05, 500);
         camera.position.set(2, 1.6, 2);
+        walkCamera = camera;
         viewerOpts.camera = camera;
         viewerOpts.useBuiltInControls = false;
 
@@ -116,7 +159,7 @@ export function SplatViewer({
           const dt = (now - lastFrame) / 1000;
           lastFrame = now;
           if (!pointerControls.isLocked) return;
-          const step = MOVE_SPEED * dt;
+          const step = moveSpeed * dt;
           for (const code of pressed) {
             switch (KEY_TO_ACTION[code]) {
               case "forward": pointerControls.moveForward(step); break;
@@ -164,10 +207,37 @@ export function SplatViewer({
             : undefined;
 
       try {
-        await viewer.addSplatScene(url, { format, showLoadingUI: true, splatAlphaRemovalThreshold: 5 });
+        await viewer.addSplatScene(url, {
+          format,
+          showLoadingUI: true,
+          splatAlphaRemovalThreshold: 5,
+          rotation: Z_UP_TO_Y_UP,
+        });
         if (cancelled) {
           await viewer.dispose();
           return;
+        }
+
+        const bounds = measureScene(viewer.getSplatMesh(), THREE);
+        if (bounds) {
+          const [cx, cy, cz] = bounds.center;
+          const [sx, sy, sz] = bounds.size;
+          const span = Math.max(sx, sz, 1e-3);
+          if (walkCamera) {
+            // Stand in the middle of the space at roughly eye height,
+            // facing along its longer horizontal side.
+            walkCamera.position.set(cx, bounds.floorY + sy * 0.6, cz);
+            walkCamera.lookAt(sx >= sz ? cx + 1 : cx, walkCamera.position.y, sx >= sz ? cz : cz + 1);
+            walkCamera.near = span * 0.002;
+            walkCamera.far = span * 50;
+            walkCamera.updateProjectionMatrix();
+            // Crossing the whole space takes about four seconds.
+            moveSpeed = span / 4;
+          } else if (viewer.camera && viewer.controls) {
+            viewer.camera.position.set(cx + span, cy + span * 0.5, cz + span);
+            viewer.controls.target.set(cx, cy, cz);
+            viewer.controls.update();
+          }
         }
         viewer.start();
         setLoading(false);
