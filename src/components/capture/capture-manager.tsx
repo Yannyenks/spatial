@@ -1,13 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { UploadCloud, Video, Play, Check } from "lucide-react";
+import { UploadCloud, Video, Play, Check, Camera } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch, ApiError, getCsrfToken } from "@/lib/api-client";
 import { CSRF_HEADER } from "@/lib/cookies";
 import { ProcessingStatus } from "./processing-status";
+import { CameraCapture } from "./camera-capture";
 import type { AIJob } from "@/types";
 
 interface SpaceRow {
@@ -49,6 +50,11 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
   const [jobId, setJobId] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  // Camera shots upload one at a time in the background so the
+  // photographer never waits on the network between shots.
+  const uploadChain = useRef<Promise<void>>(Promise.resolve());
+  const [pendingUploads, setPendingUploads] = useState(0);
 
   async function quickCreateSpace() {
     if (!newSpaceName.trim()) return;
@@ -65,28 +71,39 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
     }
   }
 
+  async function uploadFile(file: File, spaceId: string) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("spaceId", spaceId);
+    const csrfToken = getCsrfToken();
+    const res = await fetch(`/api/projects/${projectId}/assets`, {
+      method: "POST",
+      body: form,
+      headers: csrfToken ? { [CSRF_HEADER]: csrfToken } : undefined,
+    });
+    const body = await res.json();
+    if (!res.ok) throw new ApiError(body?.error?.code, body?.error?.message ?? "Upload failed.", res.status);
+    setUploadedCounts((prev) => ({ ...prev, [spaceId]: (prev[spaceId] ?? 0) + 1 }));
+    if (body?.asset?.privacyWarning) setPrivacyWarning(body.asset.privacyWarning);
+    if (body?.asset?.qualityWarning) setQualityWarning(body.asset.qualityWarning);
+  }
+
+  function queueCameraUpload(file: File) {
+    const spaceId = selectedSpaceId;
+    setPendingUploads((n) => n + 1);
+    uploadChain.current = uploadChain.current
+      .then(() => uploadFile(file, spaceId))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Upload failed."))
+      .finally(() => setPendingUploads((n) => n - 1));
+  }
+
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0 || !selectedSpaceId) return;
     const spaceId = selectedSpaceId;
     setUploading(true);
     setError(null);
     try {
-      for (const file of Array.from(files)) {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("spaceId", spaceId);
-        const csrfToken = getCsrfToken();
-        const res = await fetch(`/api/projects/${projectId}/assets`, {
-          method: "POST",
-          body: form,
-          headers: csrfToken ? { [CSRF_HEADER]: csrfToken } : undefined,
-        });
-        const body = await res.json();
-        if (!res.ok) throw new ApiError(body?.error?.code, body?.error?.message ?? "Upload failed.", res.status);
-        setUploadedCounts((prev) => ({ ...prev, [spaceId]: (prev[spaceId] ?? 0) + 1 }));
-        if (body?.asset?.privacyWarning) setPrivacyWarning(body.asset.privacyWarning);
-        if (body?.asset?.qualityWarning) setQualityWarning(body.asset.qualityWarning);
-      }
+      for (const file of Array.from(files)) await uploadFile(file, spaceId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Upload failed.");
     } finally {
@@ -114,6 +131,15 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
 
   return (
     <div className="space-y-6">
+      {cameraOpen && (
+        <CameraCapture
+          count={selectedSpaceUploadedCount + pendingUploads}
+          target={RECOMMENDED_PHOTO_COUNT}
+          pendingUploads={pendingUploads}
+          onCapture={queueCameraUpload}
+          onClose={() => setCameraOpen(false)}
+        />
+      )}
       <Card>
         <CardContent className="pt-5">
           <h2 className="text-sm font-semibold">1. Choose a space</h2>
@@ -171,8 +197,14 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
             className="mt-4 flex flex-col items-center justify-center rounded-[var(--radius-lg)] border-2 border-dashed border-[var(--line)] px-6 py-12 text-center"
           >
             <UploadCloud className="mb-3 h-6 w-6 text-[var(--fg-muted)]" />
-            <p className="text-sm text-[var(--fg-muted)]">Drag photos or a walkthrough video here</p>
-            <div className="mt-4 flex gap-2">
+            <p className="text-sm text-[var(--fg-muted)]">
+              Take guided photos with your phone, or drag photos / a walkthrough video here
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button size="sm" disabled={!selectedSpaceId || uploading} onClick={() => setCameraOpen(true)}>
+                <Camera className="h-4 w-4" />
+                Take photos
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"
@@ -223,18 +255,26 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
 
       <Card>
         <CardContent className="pt-5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-sm font-semibold">3. Process this space</h2>
               <p className="mt-1 text-sm text-[var(--fg-muted)]">
                 Runs media validation, scene understanding and spatial reconstruction.
               </p>
             </div>
-            <Button onClick={startProcessing} disabled={!selectedSpaceId || processing}>
+            <Button
+              onClick={startProcessing}
+              disabled={!selectedSpaceId || processing || pendingUploads > 0}
+              className="self-start sm:self-auto"
+            >
               <Play className="h-4 w-4" />
               Analyze
             </Button>
           </div>
+
+          {pendingUploads > 0 && (
+            <p className="mt-3 text-xs text-[var(--fg-muted)]">Waiting for {pendingUploads} photo(s) to finish uploading…</p>
+          )}
 
           {jobId && (
             <div className="mt-5 border-t border-[var(--line)] pt-5">

@@ -12,9 +12,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!organization) redirect("/register");
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen md:flex">
       <AppSidebar user={user} organization={organization} />
-      <main className="flex-1 bg-[var(--bg-muted)] px-6 py-8 sm:px-10">
+      <main className="min-w-0 flex-1 bg-[var(--bg-muted)] px-4 py-6 sm:px-10 sm:py-8">
         <div className="mx-auto max-w-6xl">{children}</div>
       </main>
       <CommandPalette />
