@@ -8,11 +8,13 @@ import type { NextConfig } from "next";
 // mic input (free-tier roadmap step A3) needs it — blocking it outright
 // broke that feature at the browser permissions-policy level, caught via
 // a live end-to-end test, not assumed from reading the code.
+// `camera=(self)` for the same reason: the guided in-app capture
+// (components/capture/camera-capture.tsx) opens the phone's camera.
 const securityHeaders = [
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" },
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" },
 ];
 
 const nextConfig: NextConfig = {
