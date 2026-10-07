@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { UploadCloud, Video, Play, Check, Camera } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,14 @@ export function CaptureManager({ projectId, initialSpaces }: { projectId: string
   // photographer never waits on the network between shots.
   const uploadChain = useRef<Promise<void>>(Promise.resolve());
   const [pendingUploads, setPendingUploads] = useState(0);
+
+  // Leaving mid-upload silently drops the queued shots.
+  useEffect(() => {
+    if (pendingUploads === 0) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [pendingUploads]);
 
   async function quickCreateSpace() {
     if (!newSpaceName.trim()) return;
