@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Camera, Check, Loader2, X } from "lucide-react";
 
 // In-app guided capture: a full-screen live camera that uploads each
@@ -184,8 +185,10 @@ export function CameraCapture({
 
   const done = count >= target;
 
-  return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-black text-white">
+  // Portaled to <body> so no transformed ancestor can turn `fixed` into
+  // "fixed to that ancestor" and leave the page peeking out underneath.
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex h-[100dvh] flex-col bg-black text-white">
       {cameraError ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
           <Camera className="h-8 w-8 text-white/60" />
@@ -287,6 +290,7 @@ export function CameraCapture({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
