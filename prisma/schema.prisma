@@ -322,10 +322,17 @@ model SplatTrainingJob {
   projectId     String
   spaceId       String
   status        String    @default("QUEUED") // QUEUED | RUNNING | COMPLETED | FAILED
+  // Which engine builds the world (see SPLAT_ENGINES in
+  // services/splat-training.service.ts): "marble" (World Labs API),
+  // "worldmirror" (Tencent HY-World 2.0 on RunPod) or "nerfstudio"
+  // (COLMAP + splatfacto on RunPod).
+  engine        String    @default("nerfstudio")
   error         String?
   providerJobId String?
   outputBucket  String?
   outputKey     String?
+  // Optional fly-through video rendered from the result (worldmirror).
+  videoKey      String?
   createdAt     DateTime  @default(now())
   completedAt   DateTime?
 
@@ -438,6 +445,11 @@ model Reconstruction {
   // URL from these instead of trusting the stored outputUri.
   outputBucket String?
   outputKey    String?
+  // Fly-through video of this version, in the same bucket as the output.
+  previewVideoKey String?
+  // Engine-specific scene facts the viewer needs (JSON), e.g. a World Labs
+  // world's id, metric scale factor and ground plane offset.
+  sceneMetaJson String?
   isCurrent    Boolean  @default(false)
   createdAt    DateTime @default(now())
 

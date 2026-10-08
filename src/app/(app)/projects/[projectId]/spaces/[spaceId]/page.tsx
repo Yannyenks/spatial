@@ -10,6 +10,8 @@ import { RelationManager } from "@/components/spaces/relation-manager";
 import { CameraPoseViewer } from "@/components/spaces/camera-pose-viewer";
 import { CameraPoseTrigger } from "@/components/spaces/camera-pose-trigger";
 import { SplatViewer } from "@/components/spaces/splat-viewer";
+import { splatFrameFor } from "@/lib/splat-frame";
+import { availableSplatEngines } from "@/services/splat-training.service";
 import { SplatUploader } from "@/components/spaces/splat-uploader";
 import { SplatTrainingTrigger } from "@/components/spaces/splat-training-trigger";
 import type { QualityScore } from "@/types";
@@ -113,10 +115,10 @@ export default async function SpaceDetailPage({
           <CardContent className="pt-5">
             <h2 className="text-sm font-semibold">3D Splat</h2>
             <div className="mt-3">
-              <SplatViewer url={reconstruction.outputUri} />
+              <SplatViewer url={reconstruction.outputUri} frame={splatFrameFor(reconstruction)} />
             </div>
             <SplatUploader projectId={projectId} spaceId={spaceId} />
-            <SplatTrainingTrigger projectId={projectId} spaceId={spaceId} />
+            <SplatTrainingTrigger projectId={projectId} spaceId={spaceId} engines={availableSplatEngines()} />
           </CardContent>
         </Card>
       )}
@@ -125,10 +127,10 @@ export default async function SpaceDetailPage({
           <CardContent className="pt-5">
             <h2 className="text-sm font-semibold">3D Splat</h2>
             <p className="mt-1 text-sm text-[var(--fg-muted)]">
-              No real 3D splat for this space yet — train one on a rented GPU below, or upload one trained elsewhere.
+              No 3D world for this space yet — generate one from its photos below, or upload a splat made elsewhere.
             </p>
             <SplatUploader projectId={projectId} spaceId={spaceId} />
-            <SplatTrainingTrigger projectId={projectId} spaceId={spaceId} />
+            <SplatTrainingTrigger projectId={projectId} spaceId={spaceId} engines={availableSplatEngines()} />
           </CardContent>
         </Card>
       )}

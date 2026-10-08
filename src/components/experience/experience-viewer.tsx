@@ -5,6 +5,7 @@ import { ArrowRight, Lock, Maximize, MapPin, Send, Share2, Sparkles, X, MessageC
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SplatViewer } from "@/components/spaces/splat-viewer";
+import { splatFrameFor } from "@/lib/splat-frame";
 
 interface Space {
   id: string;
@@ -37,6 +38,8 @@ interface Reconstruction {
   spaceId: string;
   method: string;
   outputUri: string | null;
+  model?: string | null;
+  sceneMetaJson?: string | null;
 }
 interface ExperienceData {
   experience: { id: string; name: string; slug: string; requiresPassword: boolean };
@@ -314,7 +317,13 @@ export function ExperienceViewer({ slug }: { slug: string }) {
       {/* Hero */}
       <div className="relative h-screen w-full overflow-hidden">
         {showingSplat && splatReconstruction?.outputUri ? (
-          <SplatViewer key={splatReconstruction.id} url={splatReconstruction.outputUri} controls="walk" height="100%" />
+          <SplatViewer
+            key={splatReconstruction.id}
+            url={splatReconstruction.outputUri}
+            controls="walk"
+            height="100%"
+            frame={splatFrameFor(splatReconstruction)}
+          />
         ) : heroAsset ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={heroAsset.url} alt={currentSpace?.name ?? ""} className="h-full w-full object-cover" />

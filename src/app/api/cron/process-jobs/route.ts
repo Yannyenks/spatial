@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { claimNextQueuedJob } from "@/jobs/queue";
 import { runPipelineJob } from "@/jobs/pipeline";
+import { advancePendingMarbleJobs } from "@/services/splat-training.service";
 
 // Vercel is serverless — there is no long-lived process for
 // src/instrumentation.ts's setInterval poller to run in the way it does
@@ -11,6 +12,10 @@ import { runPipelineJob } from "@/jobs/pipeline";
 // (verified live: a job froze at 71% permanently). A scheduled caller
 // (see .github/workflows/process-jobs-cron.yml) hits this route instead,
 // draining the queue in short serverless-friendly bursts.
+// Room for advancePendingMarbleJobs, which may copy a finished world's
+// splat (tens of MB) into storage after the pipeline jobs' 8s budget.
+export const maxDuration = 60;
+
 const MAX_JOBS_PER_RUN = 25;
 const TIME_BUDGET_MS = 8000; // stay safely under Vercel's Hobby-plan 10s function timeout
 
@@ -30,5 +35,8 @@ export async function POST(req: NextRequest) {
     processed++;
   }
 
-  return NextResponse.json({ processed, elapsedMs: Date.now() - start });
+  // World Labs jobs have no callback; finish any that nobody is watching.
+  const worldJobsChecked = await advancePendingMarbleJobs();
+
+  return NextResponse.json({ processed, worldJobsChecked, elapsedMs: Date.now() - start });
 }

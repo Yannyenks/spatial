@@ -3,7 +3,7 @@ import { z } from "zod";
 import { completeSplatTrainingJob } from "@/services/splat-training.service";
 
 const bodySchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("COMPLETED"), sizeBytes: z.number() }),
+  z.object({ status: z.literal("COMPLETED"), sizeBytes: z.number(), videoBytes: z.number().nullish() }),
   z.object({ status: z.literal("FAILED"), error: z.string() }),
 ]);
 

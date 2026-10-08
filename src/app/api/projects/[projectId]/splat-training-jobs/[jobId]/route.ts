@@ -3,6 +3,10 @@ import { requireUser } from "@/lib/auth";
 import { toApiError } from "@/lib/api-errors";
 import { getSplatTrainingJobStatus } from "@/services/splat-training.service";
 
+// Polling a finished World Labs job copies its splat into our storage on
+// this request, which can take well over the default function timeout.
+export const maxDuration = 60;
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ projectId: string; jobId: string }> }

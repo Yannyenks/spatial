@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { SplatFrame } from "@/lib/splat-frame";
 
 // Real 3D Gaussian Splat rendering (free-tier plan step B2 —
 // docs/free-tier-roadmap.md) via @mkkellogg/gaussian-splats-3d, a
@@ -15,14 +16,15 @@ import { useEffect, useRef, useState } from "react";
 // never evaluate that.
 const DEFAULT_VIEWER_HEIGHT = 480;
 const MOVE_SPEED = 3; // units/second, until the scene's real size is measured
-// Both training workers export with Nerfstudio (`ns-export gaussian-splat`),
-// which writes scenes Z-up inside a normalized box of roughly +/-1 unit
-// around an arbitrary center - measured on a real trained splat, not
-// assumed. This viewer is Y-up, so the scene is rotated -90deg about X on
-// load, then the camera is placed from the scene's measured bounds rather
-// than at fixed coordinates that can sit entirely outside it (which is
-// what left the walkthrough a black screen).
-const Z_UP_TO_Y_UP = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+// Metric worlds (World Labs reports scale + ground plane): a standing
+// adult's eye height and an unhurried walking pace.
+const EYE_HEIGHT_M = 1.6;
+const WALK_SPEED_M = 1.4;
+// Each engine writes its own coordinate convention (lib/splat-frame.ts);
+// the scene is reoriented on load, then the camera is placed from the
+// capture point or the scene's measured bounds - never fixed coordinates,
+// which can sit entirely outside a real scene (a black screen, seen live).
+const DEFAULT_FRAME: SplatFrame = { rotation: [0, 0, 0, 1], originIsCapturePoint: false };
 const KEY_TO_ACTION: Record<string, "forward" | "back" | "left" | "right"> = {
   KeyW: "forward",
   ArrowUp: "forward",
@@ -88,10 +90,12 @@ export function SplatViewer({
   url,
   controls = "orbit",
   height = DEFAULT_VIEWER_HEIGHT,
+  frame = DEFAULT_FRAME,
 }: {
   url: string;
   controls?: "orbit" | "walk";
   height?: number | string;
+  frame?: SplatFrame;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +103,8 @@ export function SplatViewer({
   const [locked, setLocked] = useState(false);
   const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   const walkMode = controls === "walk" && !isTouch;
+  // A stable dependency: callers build `frame` inline on every render.
+  const frameKey = JSON.stringify(frame);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +116,7 @@ export function SplatViewer({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let walkCamera: any = null;
     let moveSpeed = MOVE_SPEED;
+    const sceneFrame: SplatFrame = JSON.parse(frameKey);
     setLoading(true);
     setError(null);
 
@@ -204,14 +211,24 @@ export function SplatViewer({
           ? GaussianSplats3D.SceneFormat.KSplat
           : pathname.endsWith(".splat")
             ? GaussianSplats3D.SceneFormat.Splat
-            : undefined;
+            : pathname.endsWith(".spz")
+              ? GaussianSplats3D.SceneFormat.Spz
+              : undefined;
 
       try {
         await viewer.addSplatScene(url, {
           format,
           showLoadingUI: true,
           splatAlphaRemovalThreshold: 5,
-          rotation: Z_UP_TO_Y_UP,
+          rotation: sceneFrame.rotation,
+          // Metric: raw units -> metres, and the ground plane lifted to y=0
+          // (World Labs' convention, applied after the axis flip).
+          ...(sceneFrame.metric
+            ? {
+                scale: Array(3).fill(sceneFrame.metric.scale),
+                position: [0, sceneFrame.metric.groundOffset, 0],
+              }
+            : {}),
         });
         if (cancelled) {
           await viewer.dispose();
@@ -223,11 +240,26 @@ export function SplatViewer({
           const [cx, cy, cz] = bounds.center;
           const [sx, sy, sz] = bounds.size;
           const span = Math.max(sx, sz, 1e-3);
-          if (walkCamera) {
-            // Stand in the middle of the space at roughly eye height,
-            // facing along its longer horizontal side.
-            walkCamera.position.set(cx, bounds.floorY + sy * 0.6, cz);
-            walkCamera.lookAt(sx >= sz ? cx + 1 : cx, walkCamera.position.y, sx >= sz ? cz : cz + 1);
+          if (walkCamera && sceneFrame.metric) {
+            // Real metres: stand where the first photo was taken, at eye
+            // height, looking the way it looked.
+            walkCamera.position.set(0, EYE_HEIGHT_M, 0);
+            walkCamera.lookAt(0, EYE_HEIGHT_M, -1);
+            walkCamera.near = 0.05;
+            walkCamera.far = Math.max(200, span * 10);
+            walkCamera.updateProjectionMatrix();
+            moveSpeed = WALK_SPEED_M;
+          } else if (walkCamera) {
+            if (sceneFrame.originIsCapturePoint) {
+              // Unknown scale, but the origin is the first photo's camera.
+              walkCamera.position.set(0, 0, 0);
+              walkCamera.lookAt(0, 0, -1);
+            } else {
+              // Stand in the middle of the space at roughly eye height,
+              // facing along its longer horizontal side.
+              walkCamera.position.set(cx, bounds.floorY + sy * 0.6, cz);
+              walkCamera.lookAt(sx >= sz ? cx + 1 : cx, walkCamera.position.y, sx >= sz ? cz : cz + 1);
+            }
             walkCamera.near = span * 0.002;
             walkCamera.far = span * 50;
             walkCamera.updateProjectionMatrix();
@@ -251,7 +283,7 @@ export function SplatViewer({
       if (cleanupInput) cleanupInput();
       if (viewer) viewer.dispose().catch(() => {});
     };
-  }, [url, walkMode, height]);
+  }, [url, walkMode, height, frameKey]);
 
   return (
     // The wrapper carries the height too: with a percentage height (e.g.
