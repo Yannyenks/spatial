@@ -327,6 +327,9 @@ model SplatTrainingJob {
   // "worldmirror" (Tencent HY-World 2.0 on RunPod) or "nerfstudio"
   // (COLMAP + splatfacto on RunPod).
   engine        String    @default("nerfstudio")
+  // A requested change for a restyled world ("Scandinavian decor, warm
+  // evening light"), marble only; null for a faithful reconstruction.
+  instruction   String?
   error         String?
   providerJobId String?
   outputBucket  String?

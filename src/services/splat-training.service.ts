@@ -3,7 +3,14 @@ import { db } from "@/lib/db";
 import { requireProjectAccess } from "@/lib/permissions";
 import { getStorageProvider } from "@/providers/storage";
 import { logger } from "@/lib/logger";
-import { MARBLE_MAX_IMAGES, generateWorldFromPhotos, getOperation, type MarbleModel } from "@/providers/worldlabs";
+import {
+  MARBLE_MAX_IMAGES,
+  MARBLE_MAX_IMAGES_FREE,
+  generateWorldFromPhotos,
+  getOperation,
+  type MarbleModel,
+} from "@/providers/worldlabs";
+import { MAX_WORLD_INSTRUCTION_LENGTH, buildWorldPrompt, worldTags } from "@/lib/world-prompt";
 
 // gsplat/splatfacto needs enough overlapping views to find real matches at
 // all, same reasoning as COLMAP's own MIN_PHOTOS_FOR_SFM (camera-pose.service.ts).
@@ -128,10 +135,17 @@ export async function requestSplatTraining(
   userId: string,
   projectId: string,
   spaceId: string,
-  opts?: { maxIterations?: number; engine?: SplatEngine }
+  opts?: { maxIterations?: number; engine?: SplatEngine; instruction?: string }
 ) {
   await requireProjectAccess(userId, projectId, "MEMBER");
   const engine = opts?.engine ?? defaultSplatEngine();
+  const instruction = opts?.instruction?.trim() || null;
+  if (instruction && engine !== "marble") {
+    throw new SplatTrainingError("Only World Labs Marble can restyle a world from an instruction.");
+  }
+  if (instruction && instruction.length > MAX_WORLD_INSTRUCTION_LENGTH) {
+    throw new SplatTrainingError(`Keep the instruction under ${MAX_WORLD_INSTRUCTION_LENGTH} characters.`);
+  }
 
   const photoCount = await db.asset.count({ where: { spaceId, kind: "PHOTO" } });
   if (photoCount < MIN_PHOTOS_FOR_TRAINING) {
@@ -140,12 +154,12 @@ export async function requestSplatTraining(
     );
   }
 
-  const job = await db.splatTrainingJob.create({ data: { projectId, spaceId, status: "QUEUED", engine } });
+  const job = await db.splatTrainingJob.create({ data: { projectId, spaceId, status: "QUEUED", engine, instruction } });
 
   try {
     const providerJobId =
       engine === "marble"
-        ? await dispatchMarbleJob(job.id, projectId, spaceId)
+        ? await dispatchMarbleJob(job.id, projectId, spaceId, instruction)
         : await dispatchRunpodJob(job.id, projectId, spaceId, engine, opts?.maxIterations ?? DEFAULT_MAX_ITERATIONS);
     return await db.splatTrainingJob.update({ where: { id: job.id }, data: { providerJobId } });
   } catch (error) {
@@ -175,10 +189,45 @@ async function photoUrlsFor(spaceId: string, count: number) {
   return Promise.all(assets.map((a) => storage.getUrl(a.bucket as never, a.storageKey, { expiresInSeconds: 6 * 60 * 60 })));
 }
 
-async function dispatchMarbleJob(jobId: string, projectId: string, spaceId: string): Promise<string> {
-  const space = await db.space.findUniqueOrThrow({ where: { id: spaceId }, select: { name: true } });
-  const photoUrls = await photoUrlsFor(spaceId, SPLAT_ENGINES.marble.maxPhotos);
-  const operation = await generateWorldFromPhotos({ displayName: space.name, photoUrls, model: marbleModel() });
+/**
+ * Sends World Labs the space's photos together with what Spatial knows
+ * about it (room kind, property, what the capture showed), so the world
+ * stays this space rather than Marble's own reading of the photos. An
+ * instruction turns reconstruction mode off so the change can actually
+ * apply; the faithful version stays in the reconstruction history.
+ */
+async function dispatchMarbleJob(jobId: string, projectId: string, spaceId: string, instruction: string | null): Promise<string> {
+  const space = await db.space.findUniqueOrThrow({
+    where: { id: spaceId },
+    select: {
+      name: true,
+      kind: true,
+      project: { select: { name: true, type: true } },
+      scene: { select: { objects: { select: { type: true, label: true, provenance: true } } } },
+    },
+  });
+  const concepts = await db.spatialRelation.findMany({
+    where: { projectId, subjectType: "SPACE", subjectId: spaceId, objectType: "CONCEPT", objectLabel: { not: null } },
+    select: { objectLabel: true },
+  });
+  const textPrompt = buildWorldPrompt({
+    project: space.project,
+    space,
+    objects: space.scene?.objects,
+    concepts: concepts.map((c) => c.objectLabel!),
+    instruction,
+  });
+  const reconstruct = !instruction;
+  const photoUrls = await photoUrlsFor(spaceId, reconstruct ? MARBLE_MAX_IMAGES : MARBLE_MAX_IMAGES_FREE);
+  const operation = await generateWorldFromPhotos({
+    displayName: space.name,
+    photoUrls,
+    model: marbleModel(),
+    textPrompt,
+    reconstruct,
+    tags: worldTags({ projectId, spaceId, spaceKind: space.kind, restyled: !reconstruct }),
+  });
+  logger.info("splat_training.marble_dispatched", { jobId, spaceId, restyled: !reconstruct, textPrompt });
   const outputKey = `${projectId}/${spaceId}/splat-training-${jobId}.${SPLAT_ENGINES.marble.outputExtension}`;
   await db.splatTrainingJob.update({
     where: { id: jobId },
@@ -321,6 +370,7 @@ export async function advanceMarbleJob(jobId: string) {
         caption: world.assets?.caption,
         thumbnailUrl: world.assets?.thumbnail_url,
         splatResolution: resolution,
+        instruction: job.instruction,
       },
     });
     await db.splatTrainingJob.update({ where: { id: jobId }, data: { status: "COMPLETED", completedAt: new Date() } });

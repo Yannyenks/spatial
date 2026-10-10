@@ -18,9 +18,11 @@ export async function POST(
     const { projectId, spaceId } = await params;
     // Optional {"engine": "marble" | "worldmirror" | "nerfstudio"}; the
     // deployment's best configured engine applies when absent or unknown.
+    // Optional {"instruction": "..."} restyles the world (marble only).
     const body = await req.json().catch(() => null);
     const engine = isSplatEngine(body?.engine) ? body.engine : undefined;
-    const job = await requestSplatTraining(user.id, projectId, spaceId, { engine });
+    const instruction = typeof body?.instruction === "string" ? body.instruction : undefined;
+    const job = await requestSplatTraining(user.id, projectId, spaceId, { engine, instruction });
     return NextResponse.json({ job }, { status: 202 });
   } catch (error) {
     return await toApiError(error);

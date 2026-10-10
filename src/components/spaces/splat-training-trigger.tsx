@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Label, Textarea } from "@/components/ui/input";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import { MAX_WORLD_INSTRUCTION_LENGTH } from "@/lib/world-prompt";
 import type { SplatEngineOption } from "@/services/splat-training.service";
 
 interface SplatTrainingJob {
@@ -26,6 +28,10 @@ const STATUS_LABEL: Record<string, string> = {
  * minutes and costs real money per run, so the cost is shown before the
  * click and the job is polled rather than awaited. The page refreshes on
  * completion so the new world appears without a manual reload.
+ *
+ * With World Labs, an optional instruction ("Scandinavian decor, warm
+ * evening light") generates a restyled version of the same space instead
+ * of a faithful one; earlier versions stay restorable.
  */
 export function SplatTrainingTrigger({
   projectId,
@@ -38,6 +44,7 @@ export function SplatTrainingTrigger({
 }) {
   const router = useRouter();
   const [engine, setEngine] = useState(engines[0]?.engine);
+  const [instruction, setInstruction] = useState("");
   const [job, setJob] = useState<SplatTrainingJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -73,7 +80,10 @@ export function SplatTrainingTrigger({
     try {
       const { job: created } = await apiFetch<{ job: SplatTrainingJob }>(
         `/api/projects/${projectId}/spaces/${spaceId}/splat-training`,
-        { method: "POST", body: JSON.stringify({ engine }) }
+        {
+          method: "POST",
+          body: JSON.stringify({ engine, instruction: selected.engine === "marble" ? instruction.trim() || undefined : undefined }),
+        }
       );
       setJob(created);
       pollJob(created.id);
@@ -94,6 +104,7 @@ export function SplatTrainingTrigger({
 
   const running = job !== null && job.status in STATUS_LABEL;
   const selected = engines.find((e) => e.engine === engine) ?? engines[0]!;
+  const restyling = selected.engine === "marble" && instruction.trim().length > 0;
 
   return (
     <div className="mt-3 border-t border-[var(--line)] pt-3">
@@ -115,6 +126,27 @@ export function SplatTrainingTrigger({
           ))}
         </div>
       )}
+      {selected.engine === "marble" && (
+        <div className="mb-2">
+          <Label htmlFor={`world-instruction-${spaceId}`} className="text-xs">
+            Change the space with AI (optional)
+          </Label>
+          <Textarea
+            id={`world-instruction-${spaceId}`}
+            rows={2}
+            maxLength={MAX_WORLD_INSTRUCTION_LENGTH}
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            disabled={running}
+            placeholder="e.g. Scandinavian decor, light oak floor, warm evening light"
+          />
+          <p className="mt-1 text-xs text-[var(--fg-muted)]">
+            {restyling
+              ? "Creates a restyled version that keeps the room's layout. The current world stays in the version history."
+              : "Leave empty for a faithful copy of the room as photographed."}
+          </p>
+        </div>
+      )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <p className="text-xs text-[var(--fg-muted)]">
           {engines.length === 1 && <span className="font-medium text-[var(--fg)]">{selected.label} · </span>}
@@ -122,7 +154,7 @@ export function SplatTrainingTrigger({
         </p>
         <Button size="sm" onClick={start} disabled={starting || running} className="self-start sm:self-auto">
           <Sparkles className="h-4 w-4" />
-          {running ? STATUS_LABEL[job!.status] : "Generate 3D world"}
+          {running ? STATUS_LABEL[job!.status] : restyling ? "Generate restyled world" : "Generate 3D world"}
         </Button>
       </div>
       {job?.status === "FAILED" && (

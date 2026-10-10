@@ -45,6 +45,9 @@ export default async function SpaceDetailPage({
   const quality: QualityScore | null = reconstruction?.qualityJson ? JSON.parse(reconstruction.qualityJson) : null;
   const sceneMetadata: { cameraPoseSource?: string } = scene?.metadataJson ? JSON.parse(scene.metadataJson) : {};
   const cameraPoseSource = sceneMetadata.cameraPoseSource === "colmap" ? "real" : "placeholder";
+  const worldMeta: { instruction?: string | null } = reconstruction?.sceneMetaJson
+    ? JSON.parse(reconstruction.sceneMetaJson)
+    : {};
 
   return (
     <div className="space-y-6">
@@ -114,6 +117,11 @@ export default async function SpaceDetailPage({
         <Card>
           <CardContent className="pt-5">
             <h2 className="text-sm font-semibold">3D Splat</h2>
+            {worldMeta.instruction && (
+              <p className="mt-1 text-xs text-[var(--fg-muted)]">
+                Restyled version: &ldquo;{worldMeta.instruction}&rdquo; · earlier versions stay in the history
+              </p>
+            )}
             <div className="mt-3">
               <SplatViewer url={reconstruction.outputUri} frame={splatFrameFor(reconstruction)} />
             </div>

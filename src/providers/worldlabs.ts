@@ -9,6 +9,7 @@ const API_BASE = "https://api.worldlabs.ai/marble/v1";
 
 /** Reconstruction mode accepts at most this many images (4 otherwise). */
 export const MARBLE_MAX_IMAGES = 8;
+export const MARBLE_MAX_IMAGES_FREE = 4;
 
 export type MarbleModel = "marble-1.0-draft" | "marble-1.0" | "marble-1.1" | "marble-1.1-plus";
 
@@ -59,27 +60,33 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /**
- * Starts a world generation from photos of one space. Up to
+ * Starts a world generation from photos of one space. By default up to
  * MARBLE_MAX_IMAGES photos go in reconstruction mode, which keeps the
- * world faithful to the real room rather than freely reimagined.
+ * world faithful to the real room rather than freely reimagined. With
+ * `reconstruct: false` the text prompt is free to change what the photos
+ * show (a restyle), at the cost of using only MARBLE_MAX_IMAGES_FREE photos.
  */
 export function generateWorldFromPhotos(input: {
   displayName: string;
   photoUrls: string[];
   model: MarbleModel;
   textPrompt?: string;
+  reconstruct?: boolean;
+  tags?: string[];
 }) {
+  const reconstruct = input.reconstruct ?? true;
   return call<MarbleOperation>("/worlds:generate", {
     method: "POST",
     body: JSON.stringify({
       display_name: input.displayName.slice(0, 64),
       model: input.model,
       permission: { public: false },
+      ...(input.tags?.length ? { tags: input.tags.slice(0, 10) } : {}),
       world_prompt: {
         type: "multi-image",
-        reconstruct_images: true,
+        reconstruct_images: reconstruct,
         multi_image_prompt: input.photoUrls
-          .slice(0, MARBLE_MAX_IMAGES)
+          .slice(0, reconstruct ? MARBLE_MAX_IMAGES : MARBLE_MAX_IMAGES_FREE)
           .map((uri) => ({ content: { source: "uri", uri } })),
         ...(input.textPrompt ? { text_prompt: input.textPrompt } : {}),
       },
